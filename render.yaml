@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: creator-os-telegram
+    runtime: node
+    region: frankfurt
+    plan: starter
+    buildCommand: rm -rf app && mkdir app && unzip -q creator-os-render-ready.zip -d app && cd app && npm ci && npm run build
+    startCommand: cd app && npm run start:render
+    numInstances: 1
+    disk:
+      name: creator-os-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PILOT_HOSTED
+        value: "true"
+      - key: PILOT_DB_PATH
+        value: /var/data/pilot.sqlite
+      - key: PILOT_TELEGRAM_SEND_ENABLED
+        value: "true"
+      - key: PILOT_TELEGRAM_TIMEZONE
+        value: Europe/London
+      - key: PILOT_TELEGRAM_DAILY_HOUR
+        value: "9"
+      - key: PILOT_TELEGRAM_DAILY_MINUTE
+        value: "0"
+      - key: AI_PROVIDER
+        value: openai-compatible
+      - key: AI_BASE_URL
+        sync: false
+      - key: AI_MODEL
+        sync: false
+      - key: AI_API_KEY
+        sync: false
+      - key: PILOT_TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: PILOT_TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: PILOT_TELEGRAM_BOT_USERNAME
+        sync: false
