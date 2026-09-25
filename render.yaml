@@ -4,8 +4,9 @@ services:
     runtime: node
     region: frankfurt
     plan: starter
-    buildCommand: rm -rf app && mkdir app && unzip -q creator-os-render-ready.zip -d app && cd app && npm ci && npm run build
-    startCommand: cd app && npm run start:render
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:render
     numInstances: 1
     disk:
       name: creator-os-data
@@ -19,13 +20,15 @@ services:
       - key: PILOT_DB_PATH
         value: /var/data/pilot.sqlite
       - key: PILOT_TELEGRAM_SEND_ENABLED
-        value: "true"
+        value: "false"
       - key: PILOT_TELEGRAM_TIMEZONE
         value: Europe/London
       - key: PILOT_TELEGRAM_DAILY_HOUR
         value: "9"
       - key: PILOT_TELEGRAM_DAILY_MINUTE
         value: "0"
+      - key: PILOT_APP_URL
+        sync: false
       - key: AI_PROVIDER
         value: openai-compatible
       - key: AI_BASE_URL
