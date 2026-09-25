@@ -16,7 +16,8 @@
     "test": "node --disable-warning=ExperimentalWarning --test \"tests/**/*.test.ts\"",
     "seed": "node --disable-warning=ExperimentalWarning scripts/seed-pilot.ts",
     "telegram:poll": "node --disable-warning=ExperimentalWarning scripts/telegram-poll.ts",
-    "db:reset": "node --disable-warning=ExperimentalWarning scripts/db-reset.ts"
+    "db:reset": "node --disable-warning=ExperimentalWarning scripts/db-reset.ts",
+    "start:render": "next start -p $PORT"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
