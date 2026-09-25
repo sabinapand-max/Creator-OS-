@@ -1,0 +1,637 @@
+/**
+ * Content drafts: the path Social Studio and Marketplace now use.
+ *
+ * Proves the four things that were previously untrue of those screens:
+ *   - a generation actually happens against the configured endpoint,
+ *   - the result is stored server-side, per user, and survives a restart,
+ *   - a failure is reported honestly and stores nothing,
+ *   - Etsy cannot be requested, because it is not a channel.
+ *
+ * Inference is served by a LABELLED test double (see helpers.ts). The double
+ * stands in for external inference only; the product path never substitutes
+ * template output for a real generation.
+ */
+import test, { describe, before, after } from 'node:test'
+import assert from 'node:assert/strict'
+import { openIsolatedDb } from '../lib/pilot/db/client.ts'
+import * as repo from '../lib/pilot/db/repo.ts'
+import {
+  DRAFT_SYSTEM_PROMPT_HEADER,
+  MAX_CHANNELS_PER_CALL,
+  MAX_DRAFT_BODY_CHARS,
+  draftTokenBudget,
+  generateDrafts,
+  listDrafts,
+  deleteDraft,
+  normalizeDrafts,
+  salvageCompleteObjects,
+} from '../lib/pilot/core/drafts.ts'
+import { OFFER_CHANNELS, SOCIAL_CHANNELS, type DraftChannel } from '../lib/pilot/types.ts'
+import {
+  deadModelConfig,
+  fakeModelConfig,
+  makeUser,
+  startFakeModel,
+  tempStore,
+  type FakeModel,
+  type TempStore,
+} from './helpers.ts'
+
+/**
+ * Deliberately not a `DraftChannel`. That the union has no 'etsy' is the point
+ * of the exclusion, so the cast has to go through `unknown` — the compiler
+ * refusing the direct one is the type system proving the rule works.
+ */
+const NOT_A_CHANNEL = 'etsy' as unknown as DraftChannel
+
+/**
+ * A reply cut off at the token cap: the first offer is complete, the second
+ * stops mid-string and never closes. This is what a 3B model actually produced
+ * when asked for a Gumroad draft inside a 1600-token budget.
+ */
+const TRUNCATED_OFFER_REPLY = `{
+  "drafts": [
+    {
+      "channel": "gumroad",
+      "title": "The Newsletter Starter Kit",
+      "body": "A one-page template to plan the first six issues.",
+      "pricing": "£12 (suggested)",
+      "features": ["Weekly template"],
+      "audience": "Solo creators",
+      "packages": []
+    },
+    {
+      "channel": "fiverr",
+      "title": "I will map your creator workflow",
+      "body": "One call and a written map of`
+
+/** Truncated before any draft was finished. */
+const TRUNCATED_NO_DRAFT_REPLY = `{
+  "drafts": [
+    {
+      "channel": "gumroad",
+      "title": "The Newsletter Starter Kit",
+      "body": "A one-page template to help you plan and organize`
+
+const VALID_SOCIAL_DRAFTS = JSON.stringify({
+  drafts: [
+    {
+      channel: 'linkedin',
+      hook: 'Six focused hours a week, three unfinished projects.',
+      body: 'I kept building systems to manage the work instead of doing it.\n\nThis week the newsletter gets the first 45 minutes, not the last.',
+      hashtags: ['solocreator', 'buildinginpublic'],
+    },
+    {
+      channel: 'instagram',
+      hook: null,
+      body: 'A short post about shipping the newsletter welcome email.',
+      // Deliberately a comma-separated string: a small model writes it this way
+      // and the normaliser must still read it as a list.
+      hashtags: '#newsletter, #writing, #adhdfocus',
+    },
+  ],
+})
+
+const VALID_OFFER_DRAFTS = JSON.stringify({
+  drafts: [
+    {
+      channel: 'gumroad',
+      title: 'The 45-Minute Focus Kit',
+      body: 'A one-page planner for people with six focused hours a week.\n\nPrice is a suggestion; confirm it before listing.',
+      pricing: '£12 (suggested)',
+      features: ['Weekly block template', 'One-page picking guide'],
+      audience: 'Solo creators juggling unfinished projects',
+      packages: [],
+    },
+    {
+      channel: 'fiverr',
+      title: 'I will map your creator workflow',
+      body: 'One call, one written map of the next three steps.',
+      pricing: null,
+      features: [],
+      audience: null,
+      packages: [
+        { name: 'Basic', price: '£40', features: ['One 45-minute call'] },
+        // An empty tier is noise and must not be stored.
+        { name: '', price: '', features: [] },
+      ],
+    },
+  ],
+})
+
+describe('Content drafts', () => {
+  let store: TempStore
+
+  before(() => {
+    store = tempStore()
+  })
+
+  after(() => {
+    try {
+      store.db.close()
+    } catch {
+      /* already closed */
+    }
+    store.dispose()
+  })
+
+  /** A user with one stored project and one remembered fact, as the real flow leaves them. */
+  function seededUser(email: string, title = 'Newsletter launch') {
+    const db = store.db
+    const user = makeUser(db, email)
+    const project = repo.createProject(db, {
+      userId: user.id,
+      title,
+      summary: 'Wants the newsletter to be the main asset, has about six focused hours a week.',
+    })
+    repo.createFact(db, {
+      userId: user.id,
+      projectId: project.id,
+      content: 'Has about six focused hours per week',
+      source: 'test',
+    })
+    return { db, user, project }
+  }
+
+  test('social drafts are generated by the configured model and stored for that user', async () => {
+    const fake = await startFakeModel({ reply: VALID_SOCIAL_DRAFTS })
+    try {
+      const { db, user, project } = seededUser('drafts-social@pilot.test')
+      const config = fakeModelConfig(fake.baseUrl, 'fake/drafts-model')
+
+      const result = await generateDrafts(db, {
+        userId: user.id,
+        kind: 'social',
+        channels: ['linkedin', 'instagram'],
+        modelConfig: config,
+      })
+
+      assert.equal(result.ok, true, JSON.stringify(result))
+      if (!result.ok) return
+      assert.equal(result.kind, 'drafts')
+      if (result.kind !== 'drafts') return
+
+      assert.equal(result.drafts.length, 2)
+      assert.equal(result.model, 'fake/drafts-model')
+      assert.equal(result.projectId, project.id)
+      assert.equal(result.projectTitle, project.title)
+      assert.ok(result.latencyMs >= 0, 'latency is measured')
+
+      const linkedin = result.drafts.find((d) => d.channel === 'linkedin')
+      assert.ok(linkedin, 'a draft per requested channel')
+      assert.equal(linkedin.kind, 'social')
+      assert.equal(linkedin.userId, user.id)
+      assert.equal(linkedin.model, 'fake/drafts-model', 'the draft records which model wrote it')
+      assert.ok(linkedin.body.includes('first 45 minutes'))
+
+      // Stored, not just returned: reading it back goes through the database.
+      const stored = listDrafts(db, user.id, { kind: 'social' })
+      assert.equal(stored.length, 2)
+      assert.deepEqual(
+        stored.map((d) => d.channel).sort(),
+        ['instagram', 'linkedin']
+      )
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('a comma-separated hashtag string is read as a list, without the # symbol', async () => {
+    const fake = await startFakeModel({ reply: VALID_SOCIAL_DRAFTS })
+    try {
+      const { db, user } = seededUser('drafts-tags@pilot.test')
+      const result = await generateDrafts(db, {
+        userId: user.id,
+        kind: 'social',
+        channels: ['linkedin', 'instagram'],
+        modelConfig: fakeModelConfig(fake.baseUrl),
+      })
+      assert.equal(result.ok, true, JSON.stringify(result))
+      if (!result.ok || result.kind !== 'drafts') return
+
+      const instagram = result.drafts.find((d) => d.channel === 'instagram')
+      assert.ok(instagram)
+      assert.deepEqual(instagram.payload.hashtags, ['newsletter', 'writing', 'adhdfocus'])
+      assert.equal(instagram.payload.hook ?? null, null, 'a null hook stays null')
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('the call reaches the configured model, asks for a draft-sized budget and forbids publishing', async () => {
+    const fake = await startFakeModel({ reply: VALID_SOCIAL_DRAFTS })
+    try {
+      const { db, user, project } = seededUser('drafts-prompt@pilot.test')
+      await generateDrafts(db, {
+        userId: user.id,
+        kind: 'social',
+        channels: ['linkedin'],
+        brief: 'Focus on the newsletter, not the book.',
+        modelConfig: fakeModelConfig(fake.baseUrl, 'fake/prompt-model'),
+      })
+
+      assert.equal(fake.calls.length, 1)
+      const call = fake.calls[0]
+      assert.equal(call.model, 'fake/prompt-model', 'the configured model id reached the endpoint')
+      assert.equal(call.authorization, null, 'a loopback endpoint needs no key')
+
+      // Several drafts need more room than one interpretation plus one action.
+      assert.ok(
+        Number(call.body.max_tokens) > 900,
+        `drafts ask for more than the turn default, got ${call.body.max_tokens}`
+      )
+      assert.equal(call.body.response_format?.type, 'json_object')
+
+      const messages = call.messages as Array<{ role: string; content: string }>
+      const system = messages.find((m) => m.role === 'system')?.content ?? ''
+      const userMessage = messages.find((m) => m.role === 'user')?.content ?? ''
+
+      assert.ok(system.startsWith(DRAFT_SYSTEM_PROMPT_HEADER.slice(0, 40)))
+      assert.match(system, /never publish/i, 'the prompt forbids publishing')
+      assert.match(system, /Etsy/i, 'the prompt excludes Etsy')
+      assert.match(system, /linkedin/, 'the prompt names the requested channel')
+      // Only stored context is sent: the project and the remembered fact.
+      assert.ok(userMessage.includes(project.title), 'the stored project reaches the prompt')
+      assert.ok(userMessage.includes('six focused hours'), 'the remembered fact reaches the prompt')
+      assert.ok(userMessage.includes('Focus on the newsletter'), 'the steer reaches the prompt')
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('offer drafts carry pricing, features and only real packages', async () => {
+    const fake = await startFakeModel({ reply: VALID_OFFER_DRAFTS })
+    try {
+      const { db, user } = seededUser('drafts-offer@pilot.test')
+      const result = await generateDrafts(db, {
+        userId: user.id,
+        kind: 'offer',
+        channels: ['gumroad', 'fiverr'],
+        modelConfig: fakeModelConfig(fake.baseUrl),
+      })
+
+      assert.equal(result.ok, true, JSON.stringify(result))
+      if (!result.ok || result.kind !== 'drafts') return
+
+      const gumroad = result.drafts.find((d) => d.channel === 'gumroad')
+      const fiverr = result.drafts.find((d) => d.channel === 'fiverr')
+      assert.ok(gumroad && fiverr)
+      assert.equal(gumroad.kind, 'offer')
+      assert.equal(gumroad.title, 'The 45-Minute Focus Kit')
+      assert.equal(gumroad.payload.pricing, '£12 (suggested)')
+      assert.deepEqual(gumroad.payload.features, ['Weekly block template', 'One-page picking guide'])
+      assert.equal(gumroad.payload.audience, 'Solo creators juggling unfinished projects')
+
+      assert.equal(fiverr.payload.packages?.length, 1, 'the empty tier is dropped')
+      assert.equal(fiverr.payload.packages?.[0].name, 'Basic')
+      assert.equal(fiverr.payload.packages?.[0].price, '£40')
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('drafts survive a restart of the database file', async () => {
+    const fake = await startFakeModel({ reply: VALID_SOCIAL_DRAFTS })
+    try {
+      const { db, user } = seededUser('drafts-restart@pilot.test')
+      const first = await generateDrafts(db, {
+        userId: user.id,
+        kind: 'social',
+        channels: ['linkedin', 'instagram'],
+        modelConfig: fakeModelConfig(fake.baseUrl),
+      })
+      assert.equal(first.ok, true)
+      if (!first.ok || first.kind !== 'drafts') return
+      const ids = first.drafts.map((d) => d.id)
+
+      // A second connection to the same file, as after a service restart.
+      const reopened = openIsolatedDb(store.dbPath)
+      try {
+        const after = listDrafts(reopened, user.id, { kind: 'social' })
+        assert.deepEqual(after.map((d) => d.id).sort(), [...ids].sort())
+        assert.equal(after[0].body.includes('newsletter') || after[1].body.includes('newsletter'), true)
+      } finally {
+        reopened.close()
+      }
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('one user never sees or deletes another user\'s drafts', async () => {
+    const fake = await startFakeModel({ reply: VALID_SOCIAL_DRAFTS })
+    try {
+      const a = seededUser('drafts-owner-a@pilot.test')
+      const b = seededUser('drafts-owner-b@pilot.test', 'A different project')
+
+      const made = await generateDrafts(a.db, {
+        userId: a.user.id,
+        kind: 'social',
+        channels: ['linkedin', 'instagram'],
+        modelConfig: fakeModelConfig(fake.baseUrl),
+      })
+      assert.equal(made.ok, true)
+      if (!made.ok || made.kind !== 'drafts') return
+      const draftId = made.drafts[0].id
+
+      assert.equal(listDrafts(a.db, b.user.id).length, 0, 'B has no drafts of their own')
+
+      // B knowing the id changes nothing: the delete is ownership-scoped.
+      assert.equal(deleteDraft(a.db, b.user.id, draftId), false)
+      assert.equal(listDrafts(a.db, a.user.id, { kind: 'social' }).length, 2, 'A still has both')
+      assert.ok(repo.getContentDraft(a.db, a.user.id, draftId), 'A can still read it')
+      assert.equal(repo.getContentDraft(a.db, b.user.id, draftId), null, 'B cannot read it')
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('deleting a draft removes it from listings and reports honestly the second time', async () => {
+    const fake = await startFakeModel({ reply: VALID_SOCIAL_DRAFTS })
+    try {
+      const { db, user } = seededUser('drafts-delete@pilot.test')
+      const made = await generateDrafts(db, {
+        userId: user.id,
+        kind: 'social',
+        channels: ['linkedin', 'instagram'],
+        modelConfig: fakeModelConfig(fake.baseUrl),
+      })
+      assert.equal(made.ok, true)
+      if (!made.ok || made.kind !== 'drafts') return
+      const draftId = made.drafts[0].id
+
+      assert.equal(deleteDraft(db, user.id, draftId), true)
+      assert.equal(listDrafts(db, user.id).length, 1)
+      assert.equal(deleteDraft(db, user.id, draftId), false, 'an already-deleted draft reports false')
+      assert.equal(deleteDraft(db, user.id, 'no-such-id'), false)
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('with nothing stored it refuses honestly and never calls the model', async () => {
+    const fake = await startFakeModel({ reply: VALID_SOCIAL_DRAFTS })
+    try {
+      const db = store.db
+      const user = makeUser(db, 'drafts-empty@pilot.test')
+
+      const result = await generateDrafts(db, {
+        userId: user.id,
+        kind: 'social',
+        channels: ['linkedin'],
+        modelConfig: fakeModelConfig(fake.baseUrl),
+      })
+
+      assert.equal(result.ok, false)
+      if (result.ok) return
+      assert.equal(result.kind, 'no_context')
+      if (result.kind !== 'no_context') return
+      assert.match(result.message, /brain dump/i, 'it says what to do instead')
+      assert.equal(fake.calls.length, 0, 'no model call was made for a user with no context')
+      assert.equal(listDrafts(db, user.id).length, 0)
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('an unreachable model returns a typed failure, records it and stores nothing', async () => {
+    const { db, user } = seededUser('drafts-down@pilot.test')
+
+    const result = await generateDrafts(db, {
+      userId: user.id,
+      kind: 'social',
+      channels: ['linkedin'],
+      modelConfig: deadModelConfig(),
+    })
+
+    assert.equal(result.ok, false)
+    if (result.ok) return
+    assert.equal(result.kind, 'model_failure')
+    if (result.kind !== 'model_failure') return
+    assert.equal(result.failure.code, 'model_unreachable')
+    assert.equal(result.failure.retryable, true)
+    assert.match(result.failure.message, /127\.0\.0\.1/, 'it names the endpoint it could not reach')
+
+    assert.equal(listDrafts(db, user.id).length, 0, 'no template text was substituted')
+
+    const runs = repo.recentModelRuns(db, user.id, 5)
+    const run = runs.find((r) => r.id === result.runId)
+    assert.ok(run, 'the attempt is recorded as a model run')
+    assert.equal(run.status, 'failed')
+    assert.equal(run.purpose, 'social_drafts')
+    assert.equal(run.errorCode, 'model_unreachable')
+  })
+
+  test('a reply that is not usable JSON stores nothing and says what the model wrote', async () => {
+    const fake = await startFakeModel({ malformed: true })
+    try {
+      const { db, user } = seededUser('drafts-malformed@pilot.test')
+
+      const result = await generateDrafts(db, {
+        userId: user.id,
+        kind: 'social',
+        channels: ['linkedin'],
+        modelConfig: fakeModelConfig(fake.baseUrl),
+      })
+
+      assert.equal(result.ok, false)
+      if (result.ok || result.kind !== 'model_failure') return
+      assert.equal(result.failure.code, 'model_invalid_response')
+      assert.match(result.failure.message, /Start of its reply/, 'it shows the model\'s own words')
+      assert.equal(listDrafts(db, user.id).length, 0)
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('a completion that offers etsy produces nothing, because etsy is not a channel', async () => {
+    // The model is told not to propose Etsy. If it does anyway, the completion is
+    // dropped rather than stored under a channel the pilot does not have.
+    const normalized = normalizeDrafts(
+      { drafts: [{ channel: 'etsy', title: 'A listing', body: 'Digital download.' }] },
+      'offer',
+      OFFER_CHANNELS
+    )
+    assert.deepEqual(normalized, [])
+    assert.ok(!OFFER_CHANNELS.includes(NOT_A_CHANNEL))
+    assert.ok(!SOCIAL_CHANNELS.includes(NOT_A_CHANNEL))
+  })
+
+  test('etsy cannot be requested as a channel and no model call is made', async () => {
+    const fake = await startFakeModel({ reply: VALID_OFFER_DRAFTS })
+    try {
+      const { db, user } = seededUser('drafts-etsy@pilot.test')
+
+      const result = await generateDrafts(db, {
+        userId: user.id,
+        kind: 'offer',
+        channels: [NOT_A_CHANNEL],
+        modelConfig: fakeModelConfig(fake.baseUrl),
+      })
+
+      assert.equal(result.ok, false)
+      if (result.ok) return
+      assert.equal(result.kind, 'invalid_input')
+      if (result.kind !== 'invalid_input') return
+      assert.match(result.message, /gumroad, fiverr/)
+      assert.equal(fake.calls.length, 0)
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('too many channels at once is refused before any call', async () => {
+    const fake = await startFakeModel({ reply: VALID_SOCIAL_DRAFTS })
+    try {
+      const { db, user } = seededUser('drafts-cap@pilot.test')
+
+      const result = await generateDrafts(db, {
+        userId: user.id,
+        kind: 'social',
+        channels: [...SOCIAL_CHANNELS],
+        modelConfig: fakeModelConfig(fake.baseUrl),
+      })
+
+      assert.equal(SOCIAL_CHANNELS.length, 5, 'the test needs more channels than the cap')
+      assert.ok(MAX_CHANNELS_PER_CALL < SOCIAL_CHANNELS.length)
+      assert.equal(result.ok, false)
+      if (result.ok) return
+      assert.equal(result.kind, 'invalid_input')
+      if (result.kind !== 'invalid_input') return
+      assert.match(result.message, /up to 4/i)
+      assert.equal(fake.calls.length, 0)
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('the normaliser drops unknown channels, empty bodies and repeats', () => {
+    const normalized = normalizeDrafts(
+      {
+        drafts: [
+          { channel: 'linkedin', body: 'A real post.' },
+          { channel: 'linkedin', body: 'A second post for the same channel.' },
+          { channel: 'facebook', body: 'Not a channel this pilot has.' },
+          { channel: 'instagram', body: '   ' },
+          { channel: 'instagram', body: 'A real second post.' },
+          'not an object at all',
+        ],
+      },
+      'social',
+      SOCIAL_CHANNELS
+    )
+
+    assert.deepEqual(
+      normalized.map((d) => d.channel),
+      ['linkedin', 'instagram'],
+      'one draft per channel, unknown and empty ones dropped'
+    )
+    assert.equal(normalized[0].body, 'A real post.')
+    assert.equal(normalized[1].body, 'A real second post.')
+  })
+
+  test('a bare array reply is accepted, because a small model often omits the wrapper', () => {
+    const normalized = normalizeDrafts(
+      [{ channel: 'twitter', body: 'Short and plain.', hashtags: ['writing'] }],
+      'social',
+      SOCIAL_CHANNELS
+    )
+    assert.equal(normalized.length, 1)
+    assert.equal(normalized[0].channel, 'twitter')
+    assert.deepEqual(normalized[0].payload.hashtags, ['writing'])
+  })
+
+  test('an offer budget is larger than a social one, because an offer carries more fields', () => {
+    assert.ok(
+      draftTokenBudget('offer') > draftTokenBudget('social'),
+      `${draftTokenBudget('offer')} vs ${draftTokenBudget('social')}`
+    )
+    assert.ok(draftTokenBudget('social') > 900, 'both need more room than one turn')
+  })
+
+  test('braces inside a draft string do not fool the salvage scanner', () => {
+    const found = salvageCompleteObjects(
+      '{"drafts":[{"channel":"linkedin","body":"a { brace and a } pair, plus \\"quotes\\""},{"channel":"inst'
+    )
+    assert.equal(found.length, 1, 'only the finished object is recovered')
+    const draft = found[0] as { channel: string; body: string }
+    assert.equal(draft.channel, 'linkedin')
+    assert.ok(draft.body.includes('{ brace'), 'the text survived intact')
+  })
+
+  test('a truncated reply keeps the drafts that were finished and says it was cut short', async () => {
+    const fake = await startFakeModel({ reply: TRUNCATED_OFFER_REPLY, finishReason: 'length' })
+    try {
+      const { db, user } = seededUser('drafts-truncated@pilot.test')
+      const result = await generateDrafts(db, {
+        userId: user.id,
+        kind: 'offer',
+        channels: ['gumroad', 'fiverr'],
+        modelConfig: fakeModelConfig(fake.baseUrl),
+      })
+
+      assert.equal(result.ok, true, JSON.stringify(result))
+      if (!result.ok || result.kind !== 'drafts') return
+      assert.equal(result.truncated, true, 'the caller is told the answer was cut off')
+      assert.equal(result.drafts.length, 1, 'only the finished draft is stored')
+      assert.equal(result.drafts[0].channel, 'gumroad')
+      assert.equal(result.drafts[0].title, 'The Newsletter Starter Kit')
+      assert.equal(result.drafts[0].body, 'A one-page template to plan the first six issues.')
+      assert.equal(listDrafts(db, user.id, { kind: 'offer' }).length, 1)
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('a truncated reply with nothing finished says it ran out of room, not that the format was wrong', async () => {
+    const fake = await startFakeModel({ reply: TRUNCATED_NO_DRAFT_REPLY, finishReason: 'length' })
+    try {
+      const { db, user } = seededUser('drafts-truncated-empty@pilot.test')
+      const result = await generateDrafts(db, {
+        userId: user.id,
+        kind: 'offer',
+        channels: ['gumroad'],
+        modelConfig: fakeModelConfig(fake.baseUrl),
+      })
+
+      assert.equal(result.ok, false)
+      if (result.ok || result.kind !== 'model_failure') return
+      assert.equal(result.failure.code, 'model_invalid_response')
+      assert.match(result.failure.message, /ran out of room/i, 'the real cause is named')
+      assert.match(result.failure.message, /AI_DRAFT_MAX_TOKENS/, 'and so is the way to fix it')
+      assert.equal(result.failure.retryable, true)
+      assert.equal(listDrafts(db, user.id).length, 0, 'nothing partial was stored')
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('a finished reply is not reported as truncated', async () => {
+    const fake = await startFakeModel({ reply: VALID_SOCIAL_DRAFTS, finishReason: 'stop' })
+    try {
+      const { db, user } = seededUser('drafts-not-truncated@pilot.test')
+      const result = await generateDrafts(db, {
+        userId: user.id,
+        kind: 'social',
+        channels: ['linkedin', 'instagram'],
+        modelConfig: fakeModelConfig(fake.baseUrl),
+      })
+      assert.equal(result.ok, true, JSON.stringify(result))
+      if (!result.ok || result.kind !== 'drafts') return
+      assert.equal(result.truncated, false)
+      assert.equal(result.drafts.length, 2)
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('a runaway completion is truncated rather than stored whole', () => {
+    const normalized = normalizeDrafts(
+      { drafts: [{ channel: 'linkedin', body: 'x'.repeat(MAX_DRAFT_BODY_CHARS * 5) }] },
+      'social',
+      SOCIAL_CHANNELS
+    )
+    assert.equal(normalized.length, 1)
+    assert.equal(normalized[0].body.length, MAX_DRAFT_BODY_CHARS)
+  })
+})

@@ -1,0 +1,24 @@
+# v0 runtime files
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+
+# Common ignores
+node_modules
+.next/
+.env*.local
+.DS_Store
+
+# Pilot data store. Contains pilot users, their brain dumps and remembered
+# facts. Never commit this, and never commit the WAL/SHM sidecar files.
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+
+# Logs, editor/backup leftovers and build artifacts. telegram.log named a real
+# bot handle, so no log file is ever tracked here.
+*.log
+*.bak
+tsconfig.tsbuildinfo
