@@ -4,6 +4,7 @@ services:
     runtime: node
     region: frankfurt
     plan: starter
+    branch: main
     # Build the tracked source directly. The previous command unzipped
     # creator-os-render-ready.zip, which is not in this repository, so the
     # build failed before it started.
@@ -24,13 +25,15 @@ services:
       - key: PILOT_DB_PATH
         value: /var/data/pilot.sqlite
       - key: PILOT_TELEGRAM_SEND_ENABLED
-        value: "true"
+        value: "false"
       - key: PILOT_TELEGRAM_TIMEZONE
         value: Europe/London
       - key: PILOT_TELEGRAM_DAILY_HOUR
         value: "9"
       - key: PILOT_TELEGRAM_DAILY_MINUTE
         value: "0"
+      - key: PILOT_APP_URL
+        sync: false
       - key: AI_PROVIDER
         value: openai-compatible
       - key: AI_BASE_URL
