@@ -17,6 +17,7 @@
     "test": "node --disable-warning=ExperimentalWarning --test \"tests/**/*.test.ts\"",
     "seed": "node --disable-warning=ExperimentalWarning scripts/seed-pilot.ts",
     "telegram:poll": "node --disable-warning=ExperimentalWarning scripts/telegram-poll.ts",
+    "telegram:probe": "node scripts/telegram-webhook-probe.mjs",
     "db:reset": "node --disable-warning=ExperimentalWarning scripts/db-reset.ts"
   },
   "dependencies": {

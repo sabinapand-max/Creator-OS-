@@ -131,6 +131,18 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
         )
         return
       }
+      // A used, expired or mistyped code is a permanent outcome. Previously the
+      // handler fell through to the auto-register path, which threw, so Telegram
+      // saw a 500 and retried the same update indefinitely while the user got no
+      // reply at all. Acknowledge it and say what to do instead. A chat that is
+      // already linked still falls through, so an old deep link merely re-welcomes.
+      if (!repo.getActiveLinkByChatId(db, chatId)) {
+        await sendTelegram(
+          chatId,
+          'That link code is no longer valid — it was used, has expired, or was mistyped. Ask Creator OS for a fresh code, then send /start followed by the new one.'
+        )
+        return
+      }
     }
 
     const userId = await getOrCreateTelegramUser(db, chatId)
