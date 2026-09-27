@@ -25,7 +25,12 @@ services:
       - key: PILOT_DB_PATH
         value: /var/data/pilot.sqlite
       - key: PILOT_TELEGRAM_SEND_ENABLED
-        value: "false"
+        # Enabled for this private pilot by explicit owner authorisation, so the
+        # doorway can actually reply. Without it the bot receives updates and
+        # only logs the would-be answer. This authorises Telegram alone: no
+        # social publishing is turned on here, and the daily pulse below is not
+        # implemented in any running code path, so those two values are inert.
+        value: "true"
       - key: PILOT_TELEGRAM_TIMEZONE
         value: Europe/London
       - key: PILOT_TELEGRAM_DAILY_HOUR
