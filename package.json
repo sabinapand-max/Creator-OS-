@@ -8,6 +8,7 @@
     "dev": "next dev -p 3100",
     "build": "next build",
     "start": "next start -p 3100",
+    "start:render": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "mcp": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env.local mcp/server.ts",

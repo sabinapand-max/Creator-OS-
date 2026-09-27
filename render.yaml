@@ -4,8 +4,13 @@ services:
     runtime: node
     region: frankfurt
     plan: starter
-    buildCommand: rm -rf app && mkdir app && unzip -q creator-os-render-ready.zip -d app && cd app && npm ci && npm run build
-    startCommand: cd app && npm run start:render
+    # Build the tracked source directly. The previous command unzipped
+    # creator-os-render-ready.zip, which is not in this repository, so the
+    # build failed before it started.
+    buildCommand: npm ci && npm run build
+    # `start:render` lets Next bind the port Render injects via PORT. The local
+    # `start` script pins 3100, which would never match Render's dynamic port.
+    startCommand: npm run start:render
     numInstances: 1
     disk:
       name: creator-os-data
