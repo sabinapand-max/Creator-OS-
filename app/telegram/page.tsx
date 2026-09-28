@@ -189,6 +189,11 @@ export default function TelegramLinkPage() {
             Never send just your Telegram username — the code is what ties this chat to your account. One chat per
             account. Group chats are refused. If this code leaks, generate a new one and the old one stops working.
           </p>
+
+          {/* This page sits outside the app shell, so give people a way back. */}
+          <Link href="/" className="inline-block text-sm text-signal underline">
+            Back to dashboard
+          </Link>
         </section>
       )}
     </main>

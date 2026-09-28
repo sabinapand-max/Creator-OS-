@@ -2,6 +2,8 @@
 
 import { usePilotStore, useUIStore, type ActiveTab } from '@/lib/stores'
 import { cn } from '@/lib/utils'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
   Brain,
@@ -13,6 +15,7 @@ import {
   Sparkles,
   Settings,
   LogOut,
+  Send,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -29,6 +32,7 @@ export function Sidebar() {
   const { activeTab, setActiveTab, sidebarCollapsed, toggleSidebar } = useUIStore()
   const user = usePilotStore((s) => s.user)
   const signOut = usePilotStore((s) => s.signOut)
+  const pathname = usePathname()
 
   return (
     <aside
@@ -73,6 +77,24 @@ export function Sidebar() {
           )
         })}
       </nav>
+
+      {/* Telegram pairing lives on its own route, so it is a link, not a tab */}
+      <div className="px-3 pb-1">
+        <Link
+          href="/telegram"
+          className={cn(
+            'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
+            pathname === '/telegram'
+              ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+              : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+          )}
+        >
+          <Send
+            className={cn('h-5 w-5 shrink-0', pathname === '/telegram' && 'text-primary')}
+          />
+          {!sidebarCollapsed && <span>Telegram</span>}
+        </Link>
+      </div>
 
       {/* Signed-in pilot account */}
       {user && (
