@@ -18,6 +18,7 @@ interface LinkResponse {
 
 export default function TelegramLinkPage() {
   const [signedIn, setSignedIn] = useState<boolean | null>(null)
+  const [unreachable, setUnreachable] = useState(false)
   const [displayName, setDisplayName] = useState('')
   const [issued, setIssued] = useState<LinkResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -26,31 +27,42 @@ export default function TelegramLinkPage() {
   const [secondsLeft, setSecondsLeft] = useState(0)
 
   // Who am I? state is the only place the browser learns the session is valid.
-  useEffect(() => {
-    let active = true
-    fetch('/api/pilot/state')
-      .then((response) => response.json())
-      .then((data) => {
-        if (!active) return
-        setSignedIn(Boolean(data.signedIn))
-        setDisplayName(data.user?.displayName ?? '')
-      })
-      .catch(() => {
-        if (active) setSignedIn(false)
-      })
-    return () => {
-      active = false
+  // There are three outcomes, not two: a session that is absent and a session that
+  // could not be read are different facts and must never render the same sentence.
+  const checkSession = useCallback(async () => {
+    setUnreachable(false)
+    try {
+      const response = await fetch('/api/pilot/state', { cache: 'no-store' })
+      // A cold Render instance answers with an HTML gateway error, which is not
+      // evidence that anybody is signed out.
+      if (!response.ok) throw new Error(`state_http_${response.status}`)
+      const data = (await response.json()) as { signedIn?: boolean; user?: { displayName?: string } }
+      setSignedIn(Boolean(data.signedIn))
+      setDisplayName(data.user?.displayName ?? '')
+    } catch {
+      setSignedIn(null)
+      setUnreachable(true)
     }
   }, [])
 
+  useEffect(() => {
+    void checkSession()
+  }, [checkSession])
+
   // A code is short-lived on purpose, so show the clock rather than let it die silently.
+  // The first tick runs synchronously: delaying it made a brand-new code render as
+  // "expired" for one frame, and left the previous code's countdown on screen after a
+  // regenerate, because secondsLeft still held the old value.
   useEffect(() => {
     if (!issued) return
-    const timer = setInterval(() => {
+    let timer: ReturnType<typeof setInterval>
+    const tick = () => {
       const remaining = Math.max(0, Math.round((new Date(issued.expiresAt).getTime() - Date.now()) / 1000))
       setSecondsLeft(remaining)
       if (remaining === 0) clearInterval(timer)
-    }, 1000)
+    }
+    tick()
+    timer = setInterval(tick, 1000)
     return () => clearInterval(timer)
   }, [issued])
 
@@ -94,21 +106,44 @@ export default function TelegramLinkPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col justify-center gap-6 p-6">
       <header className="space-y-1">
-        <p className="text-xs tracking-[0.3em] text-signal uppercase">Creator OS · private pilot</p>
+        <p className="text-xs tracking-[0.3em] text-emerald-300 uppercase">Creator OS · private pilot</p>
         <h1 className="text-2xl font-semibold text-white">Telegram doorway</h1>
         <p className="text-sm text-slate-400">
           Pair one Telegram chat with your account. Hermes replies only in the chat you link here.
         </p>
       </header>
 
-      {signedIn === null && <p className="text-sm text-slate-400">Checking your session…</p>}
+      {signedIn === null && !unreachable && <p className="text-sm text-slate-400">Checking your session…</p>}
+
+      {unreachable && (
+        <section className="rounded-xl border border-amber-400/30 bg-amber-400/5 p-5">
+          <p className="text-sm text-slate-300">
+            The pilot server could not confirm your session. On a free Render instance this almost
+            always means it is still waking up — it does not mean you were signed out.
+          </p>
+          <button
+            type="button"
+            onClick={() => void checkSession()}
+            className="mt-4 rounded-lg bg-emerald-400 px-4 py-2 text-sm font-medium text-slate-950"
+          >
+            Try again
+          </button>
+        </section>
+      )}
 
       {signedIn === false && (
         <section className="rounded-xl border border-white/10 bg-white/5 p-5">
-          <p className="text-sm text-slate-300">You are not signed in, so there is nothing to link yet.</p>
+          <p className="text-sm text-slate-300">
+            This browser has no pilot session, so there is nothing to link yet.
+          </p>
+          <p className="mt-2 text-sm text-slate-400">
+            Sign in — or register, if the pilot database was redeployed since your last visit, which
+            removes old accounts — then come back here. The Telegram entry sits in the sidebar once
+            you are signed in.
+          </p>
           <Link
             href="/"
-            className="mt-4 inline-block rounded-lg bg-signal px-4 py-2 text-sm font-medium text-slate-950"
+            className="mt-4 inline-block rounded-lg bg-emerald-400 px-4 py-2 text-sm font-medium text-slate-950"
           >
             Go to sign in
           </Link>
@@ -127,7 +162,7 @@ export default function TelegramLinkPage() {
               void request()
             }}
             disabled={busy}
-            className="rounded-lg bg-signal px-4 py-2 text-sm font-medium text-slate-950 disabled:opacity-50"
+            className="rounded-lg bg-emerald-400 px-4 py-2 text-sm font-medium text-slate-950 disabled:opacity-50"
           >
             {busy ? 'Requesting…' : issued ? 'Generate a new code' : 'Generate link code'}
           </button>
@@ -135,7 +170,7 @@ export default function TelegramLinkPage() {
           {error && <p className="text-sm text-rose-400">{error}</p>}
 
           {issued && !expired && (
-            <div className="space-y-3 rounded-lg border border-signal/40 bg-signal/10 p-4">
+            <div className="space-y-3 rounded-lg border border-emerald-400/40 bg-emerald-400/10 p-4">
               <p className="text-xs tracking-[0.2em] text-slate-400 uppercase">Your one-time code</p>
               <div className="flex flex-wrap items-center gap-3">
                 <code className="select-all font-mono text-2xl tracking-widest text-white">{issued.code}</code>
@@ -166,7 +201,7 @@ export default function TelegramLinkPage() {
                   href={issued.deepLink}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-block text-sm text-signal underline"
+                  className="inline-block text-sm text-emerald-300 underline"
                 >
                   Open this link in Telegram instead
                 </a>
@@ -191,7 +226,7 @@ export default function TelegramLinkPage() {
           </p>
 
           {/* This page sits outside the app shell, so give people a way back. */}
-          <Link href="/" className="inline-block text-sm text-signal underline">
+          <Link href="/" className="inline-block text-sm text-emerald-300 underline">
             Back to dashboard
           </Link>
         </section>
