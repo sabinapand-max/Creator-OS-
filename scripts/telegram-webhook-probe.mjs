@@ -256,7 +256,37 @@ try {
   bare.child.kill()
 }
 
-rmSync(dir, { recursive: true, force: true })
+// ---------- 9. a reply that cannot be delivered must still acknowledge the update ----------
+// An undeliverable reply used to throw, so the webhook answered 500. Telegram then retried
+// that same update for hours: the user saw complete silence while the Bot API kept reporting
+// "Wrong response from the webhook: 500 Internal Server Error", and one permanently unusable
+// chat id pinned that error forever. This reproduces the class without any outbound traffic by
+// running with no bot token, the cheapest way to make a send fail.
+{
+  PORT = 4112
+  const noToken = startServer({ port: PORT, webhookSecret: SECRET, extraEnv: { PILOT_TELEGRAM_BOT_TOKEN: '' } })
+  const up = await waitReady(PORT)
+  if (up) {
+    const res = await postWebhook(noToken, update(999002, 'a brain dump from an unlinked chat'))
+    check('a message that cannot be answered still returns an acknowledgement, not a 500',
+      res.status === 200, `got ${res.status}`)
+    check('the failed send is logged with its reason instead of thrown',
+      /send-failed[\s\S]*telegram_bot_token_missing/.test(noToken.log), noToken.log.slice(-200))
+    check('no outbound Telegram call was attempted', !noToken.log.includes('api.telegram.org'))
+  } else {
+    check('the third server started', false)
+  }
+  noToken.child.kill()
+}
+
+// Windows keeps the next-server workers alive briefly after kill, which locks the
+// temp directory. Cleanup must never decide the run's exit status or swallow the
+// summary: the checks above are the result.
+try {
+  rmSync(dir, { recursive: true, force: true })
+} catch {
+  console.log(`(could not delete the temp pilot db at ${dir} — safe to remove later)`)
+}
 
 const failed = results.filter((r) => !r.ok)
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`)

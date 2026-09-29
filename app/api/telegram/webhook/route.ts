@@ -36,22 +36,47 @@ function validSecret(request: Request): boolean {
 
 async function sendTelegram(chatId: string, text: string): Promise<void> {
   const token = process.env.PILOT_TELEGRAM_BOT_TOKEN
-  if (!token) throw new Error('telegram_bot_token_missing')
+  if (!token) {
+    logSendFailure(chatId, 'telegram_bot_token_missing')
+    return
+  }
 
   if (process.env.PILOT_TELEGRAM_SEND_ENABLED !== 'true') {
     console.log(JSON.stringify({ telegram: 'send-disabled', chatId, text }))
     return
   }
 
-  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text }),
-  })
+  let response: Response
+  try {
+    response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    })
+  } catch (error) {
+    logSendFailure(chatId, error instanceof Error ? error.message : 'network_error')
+    return
+  }
 
   if (!response.ok) {
-    throw new Error(`telegram_send_failed_${response.status}`)
+    // An undeliverable reply must not become a 500. Telegram would retry that
+    // same update for hours while the user sees nothing but silence, and one
+    // permanently bad chat id would keep the webhook looking broken forever. The
+    // failure is logged instead so the Render logs carry the real reason.
+    let description = ''
+    try {
+      const body = (await response.json()) as { description?: string }
+      description = body.description || ''
+    } catch {
+      description = 'unreadable_response'
+    }
+    logSendFailure(chatId, `http_${response.status}`, description)
+    return
   }
+}
+
+function logSendFailure(chatId: string, reason: string, description?: string): void {
+  console.error(JSON.stringify({ telegram: 'send-failed', chatId, reason, description: description || null }))
 }
 
 function renderedResult(result: SubmitTurnResult): string {
