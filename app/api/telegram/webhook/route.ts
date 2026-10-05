@@ -170,7 +170,23 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
       }
     }
 
-    const userId = await getOrCreateTelegramUser(db, chatId)
+    // An unlinked chat with auto-registration off used to throw, so /start —
+    // literally the first thing any new user sends — answered 500 and the bot
+    // appeared dead. Reply with what to do instead; the update is acknowledged
+    // so Telegram does not retry it forever.
+    let userId: string
+    try {
+      userId = await getOrCreateTelegramUser(db, chatId)
+    } catch (error) {
+      if (error instanceof Error && error.message === 'telegram_not_linked') {
+        await sendTelegram(
+          chatId,
+          'Creator OS is invite-only right now. Open your Creator OS dashboard, ask for a Telegram link code, then send /start followed by that code.'
+        )
+        return
+      }
+      throw error
+    }
     const link = repo.getActiveLinkByChatId(db, chatId)
     if (link) {
       repo.unlinkTelegramChat(db, chatId)
