@@ -856,6 +856,19 @@ export async function listLinksForUser(db: Db, userId: string): Promise<Telegram
   return rows.map(mapLink)
 }
 
+/**
+ * Every currently-linked chat across all users. Used only by server-initiated
+ * jobs (the daily pulse cron) that must reach each pilot participant once. Not
+ * a per-user read, so it intentionally does not take `userId` — callers must not
+ * surface its results to any single user.
+ */
+export async function listActiveTelegramLinks(db: Db): Promise<TelegramLink[]> {
+  const rows = (await db
+    .prepare('SELECT * FROM telegram_links WHERE unlinked_at IS NULL ORDER BY user_id, linked_at DESC')
+    .all()) as any[]
+  return rows.map(mapLink)
+}
+
 export async function unlinkTelegramChat(db: Db, telegramChatId: string): Promise<boolean> {
   const res = await db
     .prepare(
