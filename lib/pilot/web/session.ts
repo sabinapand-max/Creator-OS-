@@ -33,7 +33,7 @@ export async function requireUser(db: Db = getDb()): Promise<AuthResult> {
   if (!sessionId) {
     return { ok: false, status: 401, error: 'Not signed in.' }
   }
-  const userId = resolveSessionUser(db, sessionId)
+  const userId = await resolveSessionUser(db, sessionId)
   if (!userId) {
     return { ok: false, status: 401, error: 'Session expired. Sign in again.' }
   }
@@ -45,7 +45,7 @@ export async function optionalUser(db: Db = getDb()): Promise<{ userId: string |
   const store = await cookies()
   const sessionId = store.get(SESSION_COOKIE)?.value
   if (!sessionId) return { userId: null, db }
-  return { userId: resolveSessionUser(db, sessionId), db }
+  return { userId: await resolveSessionUser(db, sessionId), db }
 }
 
 export function sessionCookie(sessionId: string, maxAgeSeconds: number) {

@@ -42,7 +42,7 @@ describe('Brain Dump vertical slice', () => {
   after(async () => {
     await fake.close()
     try {
-      store.db.close()
+      await store.db.close()
     } catch {
       /* already closed */
     }
@@ -51,7 +51,7 @@ describe('Brain Dump vertical slice', () => {
 
   test('a brain dump returns a concise structured result from the configured endpoint', async () => {
     const db = store.db
-    const user = makeUser(db, 'slice-a@pilot.test')
+    const user = await makeUser(db, 'slice-a@pilot.test')
     const config = fakeModelConfig(fake.baseUrl, 'fake/slice-model')
 
     const result = await submitTurn(db, {
@@ -88,32 +88,32 @@ describe('Brain Dump vertical slice', () => {
 
   test('the result is saved to durable history and survives a restart', async () => {
     const db = store.db
-    const user = repo.getUserByEmail(db, 'slice-a@pilot.test')!
-    const conversations = repo.listConversations(db, user.id)
+    const user = (await repo.getUserByEmail(db, 'slice-a@pilot.test'))!
+    const conversations = await repo.listConversations(db, user.id)
     assert.equal(conversations.length, 1)
     const conversationId = conversations[0].id
 
-    const before = repo.listMessages(db, user.id, conversationId)
+    const before = await repo.listMessages(db, user.id, conversationId)
     assert.equal(before.length, 2, 'user message + assistant message')
     assert.equal(before[0].role, 'user')
     assert.equal(before[1].role, 'assistant')
 
-    const projects = repo.listProjects(db, user.id)
+    const projects = await repo.listProjects(db, user.id)
     assert.equal(projects.length, 1)
-    const actions = repo.listOpenActions(db, user.id, projects[0].id)
+    const actions = await repo.listOpenActions(db, user.id, projects[0].id)
     assert.equal(actions.length, 1, 'exactly one open next action')
 
     // Simulated service restart: close the file and open it again.
     const dbPath = store.dbPath
-    db.close()
+    await db.close()
     const reopened = openIsolatedDb(dbPath)
     try {
-      const after = repo.listMessages(reopened, user.id, conversationId)
+      const after = await repo.listMessages(reopened, user.id, conversationId)
       assert.equal(after.length, 2)
       assert.equal(after[1].content, before[1].content)
-      assert.equal(repo.listProjects(reopened, user.id).length, 1)
-      assert.equal(repo.listOpenActions(reopened, user.id, projects[0].id).length, 1)
-      assert.equal(repo.listFacts(reopened, user.id, projects[0].id).length, 2)
+      assert.equal((await repo.listProjects(reopened, user.id)).length, 1)
+      assert.equal((await repo.listOpenActions(reopened, user.id, projects[0].id)).length, 1)
+      assert.equal((await repo.listFacts(reopened, user.id, projects[0].id)).length, 2)
     } finally {
       // Hand the reopened connection back so later tests keep working.
       store.db = reopened
@@ -122,9 +122,10 @@ describe('Brain Dump vertical slice', () => {
 
   test('a follow-up continues the same brain dump conversation', async () => {
     const db = store.db
-    const user = repo.getUserByEmail(db, 'slice-a@pilot.test')!
-    const conversationId = repo.listConversations(db, user.id)[0].id
-    const projectCountBefore = repo.listProjects(db, user.id).length
+    const user = (await repo.getUserByEmail(db, 'slice-a@pilot.test'))!
+    const conversations = await repo.listConversations(db, user.id)
+    const conversationId = conversations[0].id
+    const projectCountBefore = (await repo.listProjects(db, user.id)).length
     const callsBefore = fake.calls.length
 
     const follow = await submitTurn(db, {
@@ -141,7 +142,7 @@ describe('Brain Dump vertical slice', () => {
     assert.equal(follow.conversationId, conversationId, 'same conversation')
     assert.equal(fake.calls.length, callsBefore + 1, 'one model call for the follow-up')
     assert.equal(
-      repo.listProjects(db, user.id).length,
+      (await repo.listProjects(db, user.id)).length,
       projectCountBefore,
       'a follow-up must not create a second project'
     )
@@ -151,7 +152,7 @@ describe('Brain Dump vertical slice', () => {
     assert.ok(promptText.includes('CONVERSATION SO FAR'), 'history is passed to the model')
     assert.ok(promptText.includes('newsletter'), 'earlier brain dump content is in context')
 
-    assert.equal(repo.listMessages(db, user.id, conversationId).length, 4)
+    assert.equal((await repo.listMessages(db, user.id, conversationId)).length, 4)
   })
 
   test('Etsy and inventory are excluded from the model contract', () => {
@@ -163,7 +164,7 @@ describe('Brain Dump vertical slice', () => {
 
   test('an unconfigured model reports honestly and never fabricates advice', async () => {
     const db = store.db
-    const user = makeUser(db, 'slice-unconfigured@pilot.test')
+    const user = await makeUser(db, 'slice-unconfigured@pilot.test')
     // An explicitly empty environment, so the test stays true even though the
     // developer's own .env.local may point at a working model.
     const noEnv = {} as NodeJS.ProcessEnv
@@ -187,16 +188,16 @@ describe('Brain Dump vertical slice', () => {
 
     // The user's words are stored even though no advice could be produced.
     const conversationId = result.conversationId!
-    const messages = repo.listMessages(db, user.id, conversationId)
+    const messages = await repo.listMessages(db, user.id, conversationId)
     assert.equal(messages.length, 1, 'only the user message; no invented assistant reply')
     assert.equal(messages[0].role, 'user')
     assert.equal(messages[0].content, DUMP)
-    assert.equal(repo.listOpenActions(db, user.id, null).length, 0)
+    assert.equal((await repo.listOpenActions(db, user.id, null)).length, 0)
   })
 
   test('a model outage preserves input, shows an honest error, and retries cleanly', async () => {
     const db = store.db
-    const user = makeUser(db, 'slice-outage@pilot.test')
+    const user = await makeUser(db, 'slice-outage@pilot.test')
     const dead = deadModelConfig()
 
     const first = await submitTurn(db, {
@@ -215,7 +216,7 @@ describe('Brain Dump vertical slice', () => {
     assert.equal(first.failure.retryable, true)
     assert.equal(first.preservedInput, DUMP)
     const conversationId = first.conversationId!
-    assert.equal(repo.listMessages(db, user.id, conversationId).length, 1)
+    assert.equal((await repo.listMessages(db, user.id, conversationId)).length, 1)
 
     // Retry the SAME request once the endpoint is healthy.
     const retry = await submitTurn(db, {
@@ -228,14 +229,15 @@ describe('Brain Dump vertical slice', () => {
     })
     assert.equal(retry.ok, true, JSON.stringify(retry))
     if (!retry.ok || retry.kind !== 'model_turn') return
-    assert.equal(repo.listMessages(db, user.id, conversationId).length, 2, 'no duplicated user message')
-    assert.equal(repo.listOpenActions(db, user.id, null).filter((a) => a.conversationId === conversationId).length, 1)
+    assert.equal((await repo.listMessages(db, user.id, conversationId)).length, 2, 'no duplicated user message')
+    const actions = await repo.listOpenActions(db, user.id, null)
+    assert.equal(actions.filter((a) => a.conversationId === conversationId).length, 1)
   })
 
   test('a malformed model reply is reported, not passed off as advice', async () => {
     const malformedFake = await startFakeModel({ malformed: true })
     const db = store.db
-    const user = makeUser(db, 'slice-malformed@pilot.test')
+    const user = await makeUser(db, 'slice-malformed@pilot.test')
     try {
       const result = await submitTurn(db, {
         userId: user.id,
@@ -255,7 +257,7 @@ describe('Brain Dump vertical slice', () => {
   test('a slow model times out honestly instead of hanging the pilot user', async () => {
     const hanging = await startFakeModel({ hang: true })
     const db = store.db
-    const user = makeUser(db, 'slice-timeout@pilot.test')
+    const user = await makeUser(db, 'slice-timeout@pilot.test')
     try {
       const result = await submitTurn(db, {
         userId: user.id,
@@ -274,8 +276,9 @@ describe('Brain Dump vertical slice', () => {
 
   test('"save for later" and "where was I?" work with no model available', async () => {
     const db = store.db
-    const user = repo.getUserByEmail(db, 'slice-a@pilot.test')!
-    const conversationId = repo.listConversations(db, user.id)[0].id
+    const user = (await repo.getUserByEmail(db, 'slice-a@pilot.test'))!
+    const conversations = await repo.listConversations(db, user.id)
+    const conversationId = conversations[0].id
     const dead = deadModelConfig()
     const callsBefore = fake.calls.length
 
@@ -289,7 +292,8 @@ describe('Brain Dump vertical slice', () => {
     assert.equal(saved.ok, true)
     if (!saved.ok || saved.kind !== 'directive') return
     assert.equal(saved.directive, 'save_for_later')
-    assert.equal(repo.getConversation(db, user.id, conversationId)!.status, 'saved_for_later')
+    const conv = await repo.getConversation(db, user.id, conversationId)
+    assert.equal(conv!.status, 'saved_for_later')
 
     const resumed = await submitTurn(db, {
       userId: user.id,
@@ -310,9 +314,10 @@ describe('Brain Dump vertical slice', () => {
 
   test('a re-entry card names the project and the single next action', async () => {
     const db = store.db
-    const user = repo.getUserByEmail(db, 'slice-a@pilot.test')!
-    const conversationId = repo.listConversations(db, user.id)[0].id
-    const card = buildReentryCard(db, user.id, conversationId)
+    const user = (await repo.getUserByEmail(db, 'slice-a@pilot.test'))!
+    const conversations = await repo.listConversations(db, user.id)
+    const conversationId = conversations[0].id
+    const card = await buildReentryCard(db, user.id, conversationId)
     assert.ok(card)
     assert.ok(card!.projectName)
     assert.ok(card!.nextAction)
@@ -331,7 +336,7 @@ describe('Retried requests do not duplicate work', () => {
   after(async () => {
     await fake.close()
     try {
-      store.db.close()
+      await store.db.close()
     } catch {
       /* already closed */
     }
@@ -340,7 +345,7 @@ describe('Retried requests do not duplicate work', () => {
 
   test('the same idempotency key replays the stored result and calls the model once', async () => {
     const db = store.db
-    const user = makeUser(db, 'retry-a@pilot.test')
+    const user = await makeUser(db, 'retry-a@pilot.test')
     const config = fakeModelConfig(fake.baseUrl)
     const callsBefore = fake.calls.length
 
@@ -371,9 +376,9 @@ describe('Retried requests do not duplicate work', () => {
     assert.equal(second.turn.interpretation, first.turn.interpretation)
     assert.equal(second.nextAction!.id, first.nextAction!.id, 'same action, not a duplicate')
 
-    assert.equal(repo.listMessages(db, user.id, conversationId).length, 2)
-    const actions = repo.listOpenActions(db, user.id, null).filter((a) => a.conversationId === conversationId)
-    assert.equal(actions.length, 1, 'exactly one next action after a retry')
+    assert.equal((await repo.listMessages(db, user.id, conversationId)).length, 2)
+    const actions = await repo.listOpenActions(db, user.id, null)
+    assert.equal(actions.filter((a) => a.conversationId === conversationId).length, 1, 'exactly one next action after a retry')
 
     // A third retry stays idempotent too.
     const third = await submitTurn(db, {
@@ -386,15 +391,13 @@ describe('Retried requests do not duplicate work', () => {
     })
     assert.equal(third.ok && third.kind === 'model_turn' ? third.deduplicated : false, true)
     assert.equal(fake.calls.length, callsBefore + 1)
-    assert.equal(
-      repo.listOpenActions(db, user.id, null).filter((a) => a.conversationId === conversationId).length,
-      1
-    )
+    const actions2 = await repo.listOpenActions(db, user.id, null)
+    assert.equal(actions2.filter((a) => a.conversationId === conversationId).length, 1)
   })
 
   test('a repeated identical message without a key is treated as a new turn', async () => {
     const db = store.db
-    const user = makeUser(db, 'retry-b@pilot.test')
+    const user = await makeUser(db, 'retry-b@pilot.test')
     const config = fakeModelConfig(fake.baseUrl)
     const callsBefore = fake.calls.length
 
@@ -413,7 +416,7 @@ describe('Retried requests do not duplicate work', () => {
 
     assert.equal(b.deduplicated, false)
     assert.equal(fake.calls.length, callsBefore + 2, 'both were answered')
-    assert.equal(repo.listMessages(db, user.id, a.conversationId).length, 4)
+    assert.equal((await repo.listMessages(db, user.id, a.conversationId)).length, 4)
   })
 })
 
@@ -430,8 +433,8 @@ describe('User isolation', () => {
     store = tempStore()
     const fake = await startFakeModel()
     const db = store.db
-    userA = makeUser(db, 'user-a@pilot.test')
-    userB = makeUser(db, 'user-b@pilot.test')
+    userA = await makeUser(db, 'user-a@pilot.test')
+    userB = await makeUser(db, 'user-b@pilot.test')
 
     const res = await submitTurn(db, {
       userId: userA.id,
@@ -445,33 +448,34 @@ describe('User isolation', () => {
     aProjectId = res.projectId!
     aConversationId = res.conversationId
     aActionId = res.nextAction!.id
-    aFactId = repo.listFacts(db, userA.id, aProjectId)[0].id
+    const facts = await repo.listFacts(db, userA.id, aProjectId)
+    aFactId = facts[0].id
   })
 
-  after(() => {
+  after(async () => {
     try {
-      store.db.close()
+      await store.db.close()
     } catch {
       /* already closed */
     }
     store.dispose()
   })
 
-  test('User B cannot read User A project, conversation, action or fact by id', () => {
+  test('User B cannot read User A project, conversation, action or fact by id', async () => {
     const db = store.db
-    assert.equal(repo.getProject(db, userB.id, aProjectId), null)
-    assert.equal(repo.getConversation(db, userB.id, aConversationId), null)
-    assert.equal(repo.getAction(db, userB.id, aActionId), null)
-    assert.equal(repo.getFact(db, userB.id, aFactId), null)
-    assert.equal(repo.listMessages(db, userB.id, aConversationId).length, 0)
-    assert.equal(repo.listFacts(db, userB.id, aProjectId).length, 0)
-    assert.equal(repo.listOpenActions(db, userB.id, aProjectId).length, 0)
-    assert.equal(buildReentryCard(db, userB.id, aConversationId), null)
+    assert.equal(await repo.getProject(db, userB.id, aProjectId), null)
+    assert.equal(await repo.getConversation(db, userB.id, aConversationId), null)
+    assert.equal(await repo.getAction(db, userB.id, aActionId), null)
+    assert.equal(await repo.getFact(db, userB.id, aFactId), null)
+    assert.equal((await repo.listMessages(db, userB.id, aConversationId)).length, 0)
+    assert.equal((await repo.listFacts(db, userB.id, aProjectId)).length, 0)
+    assert.equal((await repo.listOpenActions(db, userB.id, aProjectId)).length, 0)
+    assert.equal(await buildReentryCard(db, userB.id, aConversationId), null)
   })
 
-  test('User B cannot write into User A records', () => {
+  test('User B cannot write into User A records', async () => {
     const db = store.db
-    assert.throws(
+    await assert.rejects(
       () =>
         repo.appendMessage(db, {
           userId: userB.id,
@@ -481,15 +485,16 @@ describe('User isolation', () => {
         }),
       /conversation_not_found/
     )
-    assert.equal(repo.setConversationStatus(db, userB.id, aConversationId, 'closed'), false)
-    assert.equal(repo.setActionStatus(db, userB.id, aActionId, 'done'), false)
-    assert.equal(repo.correctFact(db, userB.id, aFactId, 'rewritten'), null)
-    assert.equal(repo.deleteFact(db, userB.id, aFactId), false)
-    assert.equal(repo.updateProjectSummary(db, userB.id, aProjectId, 'hijacked'), false)
+    assert.equal(await repo.setConversationStatus(db, userB.id, aConversationId, 'closed'), false)
+    assert.equal(await repo.setActionStatus(db, userB.id, aActionId, 'done'), false)
+    assert.equal(await repo.correctFact(db, userB.id, aFactId, 'rewritten'), null)
+    assert.equal(await repo.deleteFact(db, userB.id, aFactId), false)
+    assert.equal(await repo.updateProjectSummary(db, userB.id, aProjectId, 'hijacked'), false)
 
     // A's data is untouched.
-    assert.equal(repo.listMessages(db, userA.id, aConversationId).length, 2)
-    assert.equal(repo.getFact(db, userA.id, aFactId)!.content.includes('rewritten'), false)
+    assert.equal((await repo.listMessages(db, userA.id, aConversationId)).length, 2)
+    const aFact = (await repo.getFact(db, userA.id, aFactId))!
+    assert.equal(aFact.content.includes('rewritten'), false)
   })
 
   test('User B cannot continue User A conversation through submitTurn', async () => {
@@ -510,15 +515,15 @@ describe('User isolation', () => {
     } finally {
       await fake.close()
     }
-    assert.equal(repo.listMessages(db, userA.id, aConversationId).length, 2)
+    assert.equal((await repo.listMessages(db, userA.id, aConversationId)).length, 2)
   })
 
-  test('a listing never crosses users', () => {
+  test('a listing never crosses users', async () => {
     const db = store.db
-    assert.equal(repo.listProjects(db, userB.id).length, 0)
-    assert.equal(repo.listConversations(db, userB.id).length, 0)
-    assert.equal(repo.listFacts(db, userB.id).length, 0)
-    assert.equal(repo.listProjects(db, userA.id).length, 1)
+    assert.equal((await repo.listProjects(db, userB.id)).length, 0)
+    assert.equal((await repo.listConversations(db, userB.id)).length, 0)
+    assert.equal((await repo.listFacts(db, userB.id)).length, 0)
+    assert.equal((await repo.listProjects(db, userA.id)).length, 1)
   })
 })
 
@@ -528,9 +533,9 @@ describe('Remembered facts carry source and timestamps and can be corrected or d
   before(() => {
     store = tempStore()
   })
-  after(() => {
+  after(async () => {
     try {
-      store.db.close()
+      await store.db.close()
     } catch {
       /* already closed */
     }
@@ -539,7 +544,7 @@ describe('Remembered facts carry source and timestamps and can be corrected or d
 
   test('facts record where they came from, and the user can fix or remove them', async () => {
     const db = store.db
-    const user = makeUser(db, 'facts-a@pilot.test')
+    const user = await makeUser(db, 'facts-a@pilot.test')
     const fake = await startFakeModel()
     let factId: string
     let projectId: string
@@ -553,7 +558,7 @@ describe('Remembered facts carry source and timestamps and can be corrected or d
       assert.equal(res.ok, true)
       if (!res.ok || res.kind !== 'model_turn') return
       projectId = res.projectId!
-      const facts = repo.listFacts(db, user.id, projectId)
+      const facts = await repo.listFacts(db, user.id, projectId)
       assert.equal(facts.length, 2)
       factId = facts[0].id
 
@@ -566,15 +571,15 @@ describe('Remembered facts carry source and timestamps and can be corrected or d
       await fake.close()
     }
 
-    const corrected = repo.correctFact(db, user.id, factId, 'Actually the deadline is Friday')
+    const corrected = await repo.correctFact(db, user.id, factId, 'Actually the deadline is Friday')
     assert.ok(corrected)
     assert.equal(corrected!.content, 'Actually the deadline is Friday')
     assert.equal(corrected!.source, 'user_correction')
     assert.ok(corrected!.correctedFrom, 'the previous value stays traceable')
 
-    assert.equal(repo.deleteFact(db, user.id, factId), true)
-    assert.equal(repo.getFact(db, user.id, factId), null, 'a deleted fact stops being context')
-    assert.equal(repo.listFacts(db, user.id, projectId).length, 1)
-    assert.equal(repo.deleteFact(db, user.id, factId), false, 'cannot delete twice')
+    assert.equal(await repo.deleteFact(db, user.id, factId), true)
+    assert.equal(await repo.getFact(db, user.id, factId), null, 'a deleted fact stops being context')
+    assert.equal((await repo.listFacts(db, user.id, projectId)).length, 1)
+    assert.equal(await repo.deleteFact(db, user.id, factId), false, 'cannot delete twice')
   })
 })

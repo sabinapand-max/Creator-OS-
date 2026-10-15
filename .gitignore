@@ -7,6 +7,10 @@ __v0_jsx-dev-runtime.ts
 node_modules
 .next/
 .env*.local
+.env*.bak*
+.vercel/
+update_report.txtnREM
+*.log
 .DS_Store
 
 # Pilot data store. Contains pilot users, their brain dumps and remembered
@@ -22,3 +26,5 @@ data/
 *.log
 *.bak
 tsconfig.tsbuildinfo
+.vercel
+.env*.local

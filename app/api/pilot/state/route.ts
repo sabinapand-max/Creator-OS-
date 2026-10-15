@@ -27,12 +27,27 @@ export async function GET(request: Request) {
   const url = new URL(request.url)
   const conversationId = url.searchParams.get('conversationId')
 
-  const projects = repo.listProjects(db, userId)
-  const conversations = repo.listConversations(db, userId, 25)
+  const projects = await repo.listProjects(db, userId)
+  const conversations = await repo.listConversations(db, userId, 25)
   const activeConversationId =
     conversationId ?? conversations.find((c) => c.status === 'active')?.id ?? conversations[0]?.id ?? null
 
-  const user = repo.getUserById(db, userId)
+  const user = await repo.getUserById(db, userId)
+  const messages = activeConversationId ? await repo.listMessages(db, userId, activeConversationId, 100) : []
+  const latestAction = activeConversationId
+    ? await repo.latestActionForConversation(db, userId, activeConversationId)
+    : null
+  const openActions = await repo.listOpenActions(db, userId, null, 10)
+  const facts = await repo.listFacts(db, userId, undefined, 60)
+  const recentModelRuns = (await repo.recentModelRuns(db, userId, 5)).map((r) => ({
+    id: r.id,
+    status: r.status,
+    provider: r.provider,
+    model: r.model,
+    errorCode: r.errorCode,
+    latencyMs: r.latencyMs,
+    createdAt: r.createdAt,
+  }))
 
   return NextResponse.json({
     signedIn: true,
@@ -41,21 +56,11 @@ export async function GET(request: Request) {
     projects,
     conversations,
     activeConversationId,
-    messages: activeConversationId ? repo.listMessages(db, userId, activeConversationId, 100) : [],
-    latestAction: activeConversationId
-      ? repo.latestActionForConversation(db, userId, activeConversationId)
-      : null,
-    openActions: repo.listOpenActions(db, userId, null, 10),
-    facts: repo.listFacts(db, userId, undefined, 60),
-    recentModelRuns: repo.recentModelRuns(db, userId, 5).map((r) => ({
-      id: r.id,
-      status: r.status,
-      provider: r.provider,
-      model: r.model,
-      errorCode: r.errorCode,
-      latencyMs: r.latencyMs,
-      createdAt: r.createdAt,
-    })),
+    messages,
+    latestAction,
+    openActions,
+    facts,
+    recentModelRuns,
   })
 }
 

@@ -451,7 +451,7 @@ export async function generateDrafts(
 
   // Drafts are written from stored context. Without a project there is nothing
   // honest to write about, and inventing one would put words in their mouth.
-  const projects = repo.listProjects(db, input.userId)
+  const projects = await repo.listProjects(db, input.userId)
   if (projects.length === 0) {
     return {
       ok: false,
@@ -462,7 +462,7 @@ export async function generateDrafts(
   }
 
   const projectId = input.projectId ?? projects[0].id
-  const ctxRecord = getProjectContext(db, input.userId, projectId)
+  const ctxRecord = await getProjectContext(db, input.userId, projectId)
   if (!ctxRecord) {
     return { ok: false, kind: 'not_found', message: 'That project is not yours or does not exist.' }
   }
@@ -491,7 +491,7 @@ export async function generateDrafts(
   const messages = buildDraftMessages(ctx, kind, channels, brief || null)
   const callOptions: CallOptions = { maxTokens: draftTokenBudget(kind) }
 
-  const run = repo.createModelRun(db, {
+  const run = await repo.createModelRun(db, {
     userId: input.userId,
     conversationId: ctxRecord.activeConversation?.id ?? null,
     idempotencyKey: runKey,
@@ -504,8 +504,8 @@ export async function generateDrafts(
   const outcome = await callModel(messages, config, callOptions)
 
   if (!outcome.ok) {
-    repo.failModelRun(db, run.id, { errorCode: outcome.code, errorMessage: outcome.message })
-    repo.audit(db, {
+    await repo.failModelRun(db, run.id, { errorCode: outcome.code, errorMessage: outcome.message })
+    await repo.audit(db, {
       userId: input.userId,
       action: 'model_failure',
       detail: JSON.stringify({
@@ -538,12 +538,12 @@ export async function generateDrafts(
       model: outcome.modelId,
       retryable: true,
     }
-    repo.failModelRun(db, run.id, {
+    await repo.failModelRun(db, run.id, {
       errorCode: failure.code,
       errorMessage: failure.message,
       latencyMs: outcome.latencyMs,
     })
-    repo.audit(db, {
+    await repo.audit(db, {
       userId: input.userId,
       action: 'model_failure',
       detail: JSON.stringify({
@@ -558,28 +558,30 @@ export async function generateDrafts(
 
   // Record the successful completion before writing the draft rows, so a crash
   // mid-write leaves a run that shows what the model actually returned.
-  repo.completeModelRun(db, run.id, {
+  await repo.completeModelRun(db, run.id, {
     responseText: outcome.text,
     latencyMs: outcome.latencyMs,
     provider: outcome.provider,
     model: outcome.modelId,
   })
 
-  const drafts = normalized.map((draft) =>
-    repo.createContentDraft(db, {
-      userId: input.userId,
-      projectId: ctxRecord.project.id,
-      kind,
-      channel: draft.channel,
-      title: draft.title,
-      body: draft.body,
-      payload: draft.payload,
-      source,
-      model: outcome.modelId,
-    })
+  const drafts = await Promise.all(
+    normalized.map((draft) =>
+      repo.createContentDraft(db, {
+        userId: input.userId,
+        projectId: ctxRecord.project.id,
+        kind,
+        channel: draft.channel,
+        title: draft.title,
+        body: draft.body,
+        payload: draft.payload,
+        source,
+        model: outcome.modelId,
+      })
+    )
   )
 
-  repo.audit(db, {
+  await repo.audit(db, {
     userId: input.userId,
     action: 'drafts_generated',
     detail: JSON.stringify({
@@ -608,18 +610,18 @@ export async function generateDrafts(
 
 /* ------------------------------------------------------------------ listing */
 
-export function listDrafts(
+export async function listDrafts(
   db: Db,
   userId: string,
   opts: { kind?: DraftKind | null; projectId?: string | null; limit?: number } = {}
-): ContentDraft[] {
+): Promise<ContentDraft[]> {
   return repo.listContentDrafts(db, userId, opts)
 }
 
-export function deleteDraft(db: Db, userId: string, draftId: string): boolean {
-  const existed = repo.deleteContentDraft(db, userId, draftId)
+export async function deleteDraft(db: Db, userId: string, draftId: string): Promise<boolean> {
+  const existed = await repo.deleteContentDraft(db, userId, draftId)
   if (existed) {
-    repo.audit(db, {
+    await repo.audit(db, {
       userId,
       action: 'draft_deleted',
       detail: JSON.stringify({ draftId }),

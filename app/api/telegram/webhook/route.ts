@@ -95,7 +95,7 @@ async function getOrCreateTelegramUser(
   db: ReturnType<typeof getDb>,
   chatId: string
 ): Promise<string> {
-  const existingLink = repo.getActiveLinkByChatId(db, chatId)
+  const existingLink = await repo.getActiveLinkByChatId(db, chatId)
   if (existingLink) return existingLink.userId
 
   if (process.env.PILOT_TELEGRAM_AUTO_REGISTER !== 'true') {
@@ -105,23 +105,23 @@ async function getOrCreateTelegramUser(
   // Private-pilot bootstrap mode: each Telegram chat gets its own isolated
   // Creator OS account. The generated password is never returned or logged.
   const email = `telegram-${chatId.replace(/[^0-9-]/g, '')}@telegram.local`
-  const created = registerAccount(db, {
+  const created = await registerAccount(db, {
     email,
     password: `${crypto.randomUUID()}-${crypto.randomUUID()}`,
     displayName: 'Telegram pilot',
   })
 
   if (!created.ok || !created.userId) {
-    const existing = repo.getUserByEmail(db, email)
+    const existing = await repo.getUserByEmail(db, email)
     if (!existing) throw new Error(`telegram_user_create_failed_${created.error || 'unknown'}`)
-    repo.insertTelegramLink(db, {
+    await repo.insertTelegramLink(db, {
       userId: existing.id,
       telegramChatId: chatId,
     })
     return existing.id
   }
 
-  repo.insertTelegramLink(db, {
+  await repo.insertTelegramLink(db, {
     userId: created.userId,
     telegramChatId: chatId,
   })
@@ -141,10 +141,10 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
     const arg = text.slice('/start'.length).trim()
 
     if (arg) {
-      const consumed = consumeTelegramLinkCode(db, arg, chatId)
+      const consumed = await consumeTelegramLinkCode(db, arg, chatId)
       if (consumed.ok) {
-        repo.unlinkTelegramChat(db, chatId)
-        repo.insertTelegramLink(db, {
+        await repo.unlinkTelegramChat(db, chatId)
+        await repo.insertTelegramLink(db, {
           userId: consumed.userId,
           telegramChatId: chatId,
           telegramUserId: message.from?.id ? String(message.from.id) : null,
@@ -161,7 +161,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
       // saw a 500 and retried the same update indefinitely while the user got no
       // reply at all. Acknowledge it and say what to do instead. A chat that is
       // already linked still falls through, so an old deep link merely re-welcomes.
-      if (!repo.getActiveLinkByChatId(db, chatId)) {
+      if (!(await repo.getActiveLinkByChatId(db, chatId))) {
         await sendTelegram(
           chatId,
           'That link code is no longer valid — it was used, has expired, or was mistyped. Ask Creator OS for a fresh code, then send /start followed by the new one.'
@@ -187,10 +187,10 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
       }
       throw error
     }
-    const link = repo.getActiveLinkByChatId(db, chatId)
+    const link = await repo.getActiveLinkByChatId(db, chatId)
     if (link) {
-      repo.unlinkTelegramChat(db, chatId)
-      repo.insertTelegramLink(db, {
+      await repo.unlinkTelegramChat(db, chatId)
+      await repo.insertTelegramLink(db, {
         userId,
         telegramChatId: chatId,
         telegramUserId: message.from?.id ? String(message.from.id) : null,
@@ -205,7 +205,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
     return
   }
 
-  const link = repo.getActiveLinkByChatId(db, chatId)
+  const link = await repo.getActiveLinkByChatId(db, chatId)
   if (!link) {
     await sendTelegram(
       chatId,
@@ -228,7 +228,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
   })
 
   if (result.ok && result.kind === 'model_turn' && result.projectId) {
-    repo.setLinkActiveProject(db, link.userId, chatId, result.projectId)
+    await repo.setLinkActiveProject(db, link.userId, chatId, result.projectId)
   }
 
   if (
@@ -236,7 +236,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
     result.kind === 'directive' &&
     result.directive === 'unlink_telegram'
   ) {
-    repo.unlinkTelegramChat(db, chatId)
+    await repo.unlinkTelegramChat(db, chatId)
   }
 
   await sendTelegram(chatId, renderedResult(result))

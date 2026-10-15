@@ -136,7 +136,7 @@ export async function submitTurn(db: Db, input: SubmitTurnInput): Promise<Submit
   const directive = detectDirective(text)
   if (directive) return handleDirective(db, input, text, directive)
 
-  const resolved = resolveTarget(db, input)
+  const resolved = await resolveTarget(db, input)
   // Truthiness, not `'error' in resolved`: the success branch declares
   // `error?: undefined`, so an `in` check narrows to `SubmitTurnResult | undefined`.
   if (resolved.error) return resolved.error
@@ -148,12 +148,12 @@ export async function submitTurn(db: Db, input: SubmitTurnInput): Promise<Submit
   const runKey = buildRunKey(userId, text, input.idempotencyKey, conversation.id)
 
   // A previously succeeded run is replayed, never re-executed.
-  const prior = repo.getModelRunByKey(db, userId, runKey)
+  const prior = await repo.getModelRunByKey(db, userId, runKey)
   if (prior && prior.status === 'succeeded' && prior.responseText) {
     return replayTurn(db, userId, runKey, prior, conversation, project, channel)
   }
 
-  const { message: userMessage } = repo.appendMessage(db, {
+  const { message: userMessage } = await repo.appendMessage(db, {
     userId,
     conversationId: conversation.id,
     role: 'user',
@@ -164,27 +164,31 @@ export async function submitTurn(db: Db, input: SubmitTurnInput): Promise<Submit
 
   // Context is built with the new message excluded, because buildTurnMessages
   // appends it separately and a retry must not duplicate it in the prompt.
-  const ctx = promptContextForConversation(db, userId, conversation.id)
+  const ctx = await promptContextForConversation(db, userId, conversation.id)
   ctx.history = ctx.history.filter((m) => m.id !== userMessage.id)
   const messages = buildTurnMessages(ctx, text)
 
-  const run = prior
-    ? (repo.resetModelRun(db, prior.id), prior)
-    : repo.createModelRun(db, {
-        userId,
-        conversationId: conversation.id,
-        idempotencyKey: runKey,
-        purpose: 'brain_dump_turn',
-        provider: config.provider,
-        model: config.modelId || null,
-        endpoint: config.baseUrl || null,
-      })
+  let run: Awaited<ReturnType<typeof repo.createModelRun>>
+  if (prior) {
+    await repo.resetModelRun(db, prior.id)
+    run = prior
+  } else {
+    run = await repo.createModelRun(db, {
+      userId,
+      conversationId: conversation.id,
+      idempotencyKey: runKey,
+      purpose: 'brain_dump_turn',
+      provider: config.provider,
+      model: config.modelId || null,
+      endpoint: config.baseUrl || null,
+    })
+  }
 
   const outcome = await callModel(messages, config)
 
   if (!outcome.ok) {
-    repo.failModelRun(db, run.id, { errorCode: outcome.code, errorMessage: outcome.message })
-    repo.audit(db, {
+    await repo.failModelRun(db, run.id, { errorCode: outcome.code, errorMessage: outcome.message })
+    await repo.audit(db, {
       userId,
       action: 'model_failure',
       detail: JSON.stringify({ runId: run.id, code: outcome.code, status: outcome.status ?? null }),
@@ -211,7 +215,7 @@ export async function submitTurn(db: Db, input: SubmitTurnInput): Promise<Submit
       model: outcome.modelId,
       retryable: true,
     }
-    repo.failModelRun(db, run.id, {
+    await repo.failModelRun(db, run.id, {
       errorCode: failure.code,
       errorMessage: failure.message,
       latencyMs: outcome.latencyMs,
@@ -230,14 +234,14 @@ export async function submitTurn(db: Db, input: SubmitTurnInput): Promise<Submit
 
   // Record the successful completion before writing derived rows, so a crash
   // mid-write leaves a replayable run rather than a lost model answer.
-  repo.completeModelRun(db, run.id, {
+  await repo.completeModelRun(db, run.id, {
     responseText: outcome.text,
     latencyMs: outcome.latencyMs,
     provider: outcome.provider,
     model: outcome.modelId,
   })
 
-  const persisted = persistTurn(db, {
+  const persisted = await persistTurn(db, {
     userId,
     runKey,
     conversation,
@@ -276,12 +280,12 @@ interface PersistArgs {
  * `runKey`, so calling this twice for the same run produces one assistant
  * message, one next action and no duplicated facts.
  */
-function persistTurn(db: Db, args: PersistArgs): TurnSuccess {
+async function persistTurn(db: Db, args: PersistArgs): Promise<TurnSuccess> {
   const { userId, runKey, conversation, project, turn, channel } = args
   const projectId = project?.id ?? conversation.projectId
 
   const assistantText = composeAssistantText(turn)
-  const { message: assistantMessage } = repo.appendMessage(db, {
+  const { message: assistantMessage } = await repo.appendMessage(db, {
     userId,
     conversationId: conversation.id,
     role: 'assistant',
@@ -292,18 +296,20 @@ function persistTurn(db: Db, args: PersistArgs): TurnSuccess {
 
   let nextAction: NextAction | null = null
   if (turn.nextAction) {
-    nextAction = repo.proposeNextAction(db, {
-      userId,
-      projectId,
-      conversationId: conversation.id,
-      title: turn.nextAction.title,
-      detail: turn.nextAction.detail,
-      idempotencyKey: `${runKey}:action`,
-    }).action
+    nextAction = (
+      await repo.proposeNextAction(db, {
+        userId,
+        projectId,
+        conversationId: conversation.id,
+        title: turn.nextAction.title,
+        detail: turn.nextAction.detail,
+        idempotencyKey: `${runKey}:action`,
+      })
+    ).action
   }
 
   if (turn.observedFacts.length > 0) {
-    recordObservedFacts(db, {
+    await recordObservedFacts(db, {
       userId,
       projectId,
       contents: turn.observedFacts,
@@ -314,9 +320,9 @@ function persistTurn(db: Db, args: PersistArgs): TurnSuccess {
 
   if (projectId) {
     if (project && !project.summary) {
-      repo.updateProjectSummary(db, userId, projectId, turn.interpretation.slice(0, 400))
+      await repo.updateProjectSummary(db, userId, projectId, turn.interpretation.slice(0, 400))
     }
-    repo.touchProject(db, userId, projectId)
+    await repo.touchProject(db, userId, projectId)
   }
 
   return {
@@ -337,7 +343,7 @@ function persistTurn(db: Db, args: PersistArgs): TurnSuccess {
 }
 
 /** Re-apply a stored, already-successful run without calling the model. */
-function replayTurn(
+async function replayTurn(
   db: Db,
   userId: string,
   runKey: string,
@@ -345,7 +351,7 @@ function replayTurn(
   conversation: Conversation,
   project: Project | null,
   channel: ConversationChannel
-): SubmitTurnResult {
+): Promise<SubmitTurnResult> {
   const turn = parseTurnResponse(run.responseText ?? '')
   if (!turn) {
     return {
@@ -366,7 +372,7 @@ function replayTurn(
       runId: run.id,
     }
   }
-  const userMessage = repo.getMessageByKey(db, userId, `${runKey}:user`)
+  const userMessage = await repo.getMessageByKey(db, userId, `${runKey}:user`)
   return persistTurn(db, {
     userId,
     runKey,
@@ -393,50 +399,56 @@ type ResolvedTarget =
  * Decide which conversation this turn belongs to, creating a project and
  * conversation only for a genuine new brain dump.
  */
-function resolveTarget(db: Db, input: SubmitTurnInput): ResolvedTarget {
+async function resolveTarget(db: Db, input: SubmitTurnInput): Promise<ResolvedTarget> {
   const userId = input.userId
 
   if (input.conversationId) {
-    const conversation = repo.getConversation(db, userId, input.conversationId)
+    const conversation = await repo.getConversation(db, userId, input.conversationId)
     if (!conversation) {
       return { error: notFound('conversation') }
     }
-    let project = conversation.projectId ? repo.getProject(db, userId, conversation.projectId) : null
+    let project = conversation.projectId
+      ? await repo.getProject(db, userId, conversation.projectId)
+      : null
     // Attaching a project to a project-less conversation is allowed, but only
     // to one the caller owns.
     if (!conversation.projectId && input.projectId) {
-      const target = repo.getProject(db, userId, input.projectId)
+      const target = await repo.getProject(db, userId, input.projectId)
       if (!target) return { error: notFound('project') }
-      repo.setConversationProject(db, userId, conversation.id, target.id)
+      await repo.setConversationProject(db, userId, conversation.id, target.id)
       project = target
     }
     return { conversation, project }
   }
 
   if (input.projectId) {
-    const project = repo.getProject(db, userId, input.projectId)
+    const project = await repo.getProject(db, userId, input.projectId)
     if (!project) return { error: notFound('project') }
     const conversation =
-      repo.activeConversationForProject(db, userId, project.id) ??
-      repo.createConversation(db, {
+      (await repo.activeConversationForProject(db, userId, project.id)) ??
+      (await repo.createConversation(db, {
         userId,
         projectId: project.id,
         channel: input.channel,
         title: project.title,
-      })
+      }))
     return { conversation, project }
   }
 
   // No ids: this is a new brain dump. Create the project and its conversation.
   const title = (input.projectTitle ?? '').trim() || deriveProjectTitle(input.text)
-  const project = repo.createProject(db, { userId, title })
-  const conversation = repo.createConversation(db, {
+  const project = await repo.createProject(db, { userId, title })
+  const conversation = await repo.createConversation(db, {
     userId,
     projectId: project.id,
     channel: input.channel,
     title,
   })
-  repo.audit(db, { userId, action: 'brain_dump_started', detail: JSON.stringify({ projectId: project.id }) })
+  await repo.audit(db, {
+    userId,
+    action: 'brain_dump_started',
+    detail: JSON.stringify({ projectId: project.id }),
+  })
   return { conversation, project }
 }
 
@@ -477,12 +489,12 @@ export function deriveProjectTitle(text: string): string {
 const UNLINK_REPLY =
   'Telegram linking is managed from your Creator OS account. Open Settings → Telegram there to connect or disconnect.'
 
-function handleDirective(
+async function handleDirective(
   db: Db,
   input: SubmitTurnInput,
   text: string,
   directive: Exclude<Directive, null>
-): SubmitTurnResult {
+): Promise<SubmitTurnResult> {
   const userId = input.userId
 
   if (directive === 'unlink_telegram') {
@@ -500,15 +512,15 @@ function handleDirective(
   // Find the conversation this directive refers to without creating anything.
   let conversation: Conversation | null = null
   if (input.conversationId) {
-    conversation = repo.getConversation(db, userId, input.conversationId)
+    conversation = await repo.getConversation(db, userId, input.conversationId)
     if (!conversation) return notFound('conversation')
   } else if (input.projectId) {
-    const project = repo.getProject(db, userId, input.projectId)
+    const project = await repo.getProject(db, userId, input.projectId)
     if (!project) return notFound('project')
-    conversation = repo.activeConversationForProject(db, userId, project.id)
+    conversation = await repo.activeConversationForProject(db, userId, project.id)
   } else {
-    const resumeId = findResumeTarget(db, userId)
-    conversation = resumeId ? repo.getConversation(db, userId, resumeId) : null
+    const resumeId = await findResumeTarget(db, userId)
+    conversation = resumeId ? await repo.getConversation(db, userId, resumeId) : null
   }
 
   if (!conversation) {
@@ -526,7 +538,9 @@ function handleDirective(
     }
   }
 
-  const project = conversation.projectId ? repo.getProject(db, userId, conversation.projectId) : null
+  const project = conversation.projectId
+    ? await repo.getProject(db, userId, conversation.projectId)
+    : null
   const runKey = buildRunKey(userId, text, input.idempotencyKey, conversation.id)
 
   let reply: string
@@ -534,8 +548,8 @@ function handleDirective(
 
   switch (directive) {
     case 'save_for_later': {
-      repo.setConversationStatus(db, userId, conversation.id, 'saved_for_later')
-      repo.audit(db, {
+      await repo.setConversationStatus(db, userId, conversation.id, 'saved_for_later')
+      await repo.audit(db, {
         userId,
         action: 'saved_for_later',
         detail: JSON.stringify({ conversationId: conversation.id }),
@@ -545,12 +559,12 @@ function handleDirective(
       break
     }
     case 'where_was_i': {
-      card = buildReentryCard(db, userId, conversation.id)
+      card = await buildReentryCard(db, userId, conversation.id)
       reply = card ? renderReentryCard(card) : 'This conversation has nothing recorded yet.'
       break
     }
     case 'list_projects': {
-      const projects = repo.listProjects(db, userId)
+      const projects = await repo.listProjects(db, userId)
       reply =
         projects.length === 0
           ? 'No projects yet. Start a brain dump and one will be created.'
@@ -573,7 +587,7 @@ function handleDirective(
       reply = 'Not sure what to do with that.'
   }
 
-  repo.appendMessage(db, {
+  await repo.appendMessage(db, {
     userId,
     conversationId: conversation.id,
     role: 'user',
@@ -581,7 +595,7 @@ function handleDirective(
     source: input.channel,
     idempotencyKey: `${runKey}:user`,
   })
-  repo.appendMessage(db, {
+  await repo.appendMessage(db, {
     userId,
     conversationId: conversation.id,
     role: 'assistant',
@@ -657,7 +671,7 @@ export function appendConversationMessage(
  * MCP tool `propose_next_action`. Ownership-checked, and idempotent under the
  * caller's key so a retried request cannot produce two actions.
  */
-export function proposeNextActionTool(
+export async function proposeNextActionTool(
   db: Db,
   input: {
     userId: string
@@ -667,7 +681,7 @@ export function proposeNextActionTool(
     projectId?: string | null
     idempotencyKey?: string | null
   }
-): { ok: true; action: NextAction; deduplicated: boolean } | InvalidTurn {
+): Promise<{ ok: true; action: NextAction; deduplicated: boolean } | InvalidTurn> {
   const title = (input.title ?? '').trim()
   if (!title) return { ok: false, kind: 'invalid_input', message: 'A next action needs a title.' }
 
@@ -675,16 +689,16 @@ export function proposeNextActionTool(
   let projectId = input.projectId ?? null
 
   if (conversationId) {
-    const conversation = repo.getConversation(db, input.userId, conversationId)
+    const conversation = await repo.getConversation(db, input.userId, conversationId)
     if (!conversation) return notFound('conversation')
     projectId = projectId ?? conversation.projectId
   }
   if (projectId) {
-    const project = repo.getProject(db, input.userId, projectId)
+    const project = await repo.getProject(db, input.userId, projectId)
     if (!project) return notFound('project')
     projectId = project.id
     if (!conversationId) {
-      conversationId = repo.activeConversationForProject(db, input.userId, projectId)?.id ?? null
+      conversationId = (await repo.activeConversationForProject(db, input.userId, projectId))?.id ?? null
     }
   }
   if (!conversationId && !projectId) {
@@ -695,7 +709,7 @@ export function proposeNextActionTool(
     }
   }
 
-  const { action, deduplicated } = repo.proposeNextAction(db, {
+  const { action, deduplicated } = await repo.proposeNextAction(db, {
     userId: input.userId,
     projectId,
     conversationId,
@@ -703,32 +717,32 @@ export function proposeNextActionTool(
     detail: input.detail?.trim() ? input.detail.trim() : null,
     idempotencyKey: input.idempotencyKey ?? null,
   })
-  if (projectId) repo.touchProject(db, input.userId, projectId)
+  if (projectId) await repo.touchProject(db, input.userId, projectId)
   return { ok: true, action, deduplicated }
 }
 
 /** MCP tool `get_reentry_card`. */
-export function getReentryCardTool(
+export async function getReentryCardTool(
   db: Db,
   input: { userId: string; conversationId?: string | null }
-): { ok: true; card: ReentryCard; rendered: string } | InvalidTurn {
-  const conversationId = input.conversationId?.trim() || findResumeTarget(db, input.userId)
+): Promise<{ ok: true; card: ReentryCard; rendered: string } | InvalidTurn> {
+  const conversationId = input.conversationId?.trim() || (await findResumeTarget(db, input.userId))
   if (!conversationId) {
     return { ok: false, kind: 'not_found', message: 'No conversation to resume yet.' }
   }
-  const card = buildReentryCard(db, input.userId, conversationId)
+  const card = await buildReentryCard(db, input.userId, conversationId)
   if (!card) return notFound('conversation')
   return { ok: true, card, rendered: renderReentryCard(card) }
 }
 
 /** Park a conversation. Reversible through `reopenConversation`. */
-export function saveForLater(
+export async function saveForLater(
   db: Db,
   input: { userId: string; conversationId: string }
-): { ok: boolean } | InvalidTurn {
-  const done = repo.setConversationStatus(db, input.userId, input.conversationId, 'saved_for_later')
+): Promise<{ ok: boolean } | InvalidTurn> {
+  const done = await repo.setConversationStatus(db, input.userId, input.conversationId, 'saved_for_later')
   if (!done) return notFound('conversation')
-  repo.audit(db, {
+  await repo.audit(db, {
     userId: input.userId,
     action: 'saved_for_later',
     detail: JSON.stringify({ conversationId: input.conversationId }),
@@ -736,34 +750,34 @@ export function saveForLater(
   return { ok: true }
 }
 
-export function reopenConversation(
+export async function reopenConversation(
   db: Db,
   input: { userId: string; conversationId: string }
-): { ok: boolean } | InvalidTurn {
-  const done = repo.setConversationStatus(db, input.userId, input.conversationId, 'active')
+): Promise<{ ok: boolean } | InvalidTurn> {
+  const done = await repo.setConversationStatus(db, input.userId, input.conversationId, 'active')
   if (!done) return notFound('conversation')
   return { ok: true }
 }
 
 /** Attach a conversation to one of the user's projects (Telegram disambiguation). */
-export function attachProject(
+export async function attachProject(
   db: Db,
   input: { userId: string; conversationId: string; projectId: string }
-): { ok: boolean } | InvalidTurn {
-  const conversation = repo.getConversation(db, input.userId, input.conversationId)
+): Promise<{ ok: boolean } | InvalidTurn> {
+  const conversation = await repo.getConversation(db, input.userId, input.conversationId)
   if (!conversation) return notFound('conversation')
-  const project = repo.getProject(db, input.userId, input.projectId)
+  const project = await repo.getProject(db, input.userId, input.projectId)
   if (!project) return notFound('project')
-  const done = repo.setConversationProject(db, input.userId, conversation.id, project.id)
+  const done = await repo.setConversationProject(db, input.userId, conversation.id, project.id)
   if (!done) return notFound('conversation')
   return { ok: true }
 }
 
-export function markActionStatus(
+export async function markActionStatus(
   db: Db,
   input: { userId: string; actionId: string; status: 'accepted' | 'done' | 'discarded' }
-): { ok: boolean } | InvalidTurn {
-  const done = repo.setActionStatus(db, input.userId, input.actionId, input.status)
+): Promise<{ ok: boolean } | InvalidTurn> {
+  const done = await repo.setActionStatus(db, input.userId, input.actionId, input.status)
   if (!done) return notFound('next action')
   return { ok: true }
 }

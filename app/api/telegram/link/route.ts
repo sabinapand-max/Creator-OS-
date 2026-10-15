@@ -10,13 +10,13 @@ export async function POST() {
   const store = await cookies()
   const sessionId = store.get('cop_session')?.value
   const db = getDb()
-  const userId = resolveSessionUser(db, sessionId)
+  const userId = await resolveSessionUser(db, sessionId)
 
   if (!userId) {
     return NextResponse.json({ ok: false, error: 'sign_in_required' }, { status: 401 })
   }
 
-  const issued = issueTelegramLinkCode(db, userId)
+  const issued = await issueTelegramLinkCode(db, userId)
   const username = process.env.PILOT_TELEGRAM_BOT_USERNAME || ''
 
   return NextResponse.json({

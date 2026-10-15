@@ -121,7 +121,7 @@ if (!token) {
   )
   process.exitCode = 1
 } else {
-  const userId = resolveMcpBearer(db, token)
+  const userId = await resolveMcpBearer(db, token)
   if (!userId) {
     process.stderr.write(
       'That MCP token is not valid — it is unknown, revoked or expired. Mint a new one\n' +
@@ -129,7 +129,7 @@ if (!token) {
     )
     process.exitCode = 1
   } else {
-    const account = repo.getUserById(db, userId)
+    const account = await repo.getUserById(db, userId)
     await start(userId, account?.displayName ?? account?.email ?? userId)
   }
 }
@@ -173,8 +173,8 @@ async function start(userId: string, who: string): Promise<void> {
         projectId: z.string().describe('Id of one of your projects, as returned by the other tools.'),
       },
     },
-    ({ projectId }) => {
-      const context = getProjectContext(db, userId, projectId)
+    async ({ projectId }) => {
+      const context = await getProjectContext(db, userId, projectId)
       if (!context) return out('No such project, or it is not yours.', undefined, true)
       return out(
         [
@@ -222,8 +222,8 @@ async function start(userId: string, who: string): Promise<void> {
         projectId: z.string().optional().describe('Attach to this project.'),
       },
     },
-    ({ title, detail, conversationId, projectId }) => {
-      const result = proposeNextActionTool(db, {
+    async ({ title, detail, conversationId, projectId }) => {
+      const result = await proposeNextActionTool(db, {
         userId,
         title,
         detail: detail ?? null,
@@ -250,8 +250,8 @@ async function start(userId: string, who: string): Promise<void> {
         conversationId: z.string().optional().describe('Omit to pick the most recent resumable conversation.'),
       },
     },
-    ({ conversationId }) => {
-      const result = getReentryCardTool(db, { userId, conversationId: conversationId ?? null })
+    async ({ conversationId }) => {
+      const result = await getReentryCardTool(db, { userId, conversationId: conversationId ?? null })
       if (!result.ok) return out(`${result.kind}: ${result.message}`, undefined, true)
       return out(result.rendered, result.card)
     }

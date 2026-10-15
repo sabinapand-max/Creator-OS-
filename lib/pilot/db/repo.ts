@@ -9,6 +9,11 @@
  * file accepts a caller-asserted owner: the owner always comes from a verified
  * credential resolved upstream (web session, MCP bearer token, or a stored
  * Telegram link).
+ *
+ * All functions are async because the `Db` interface may be backed by Neon
+ * Postgres (see client.ts). `?` placeholders are translated to `$n` there.
+ * Ordering tiebreakers use `id` rather than SQLite's `rowid` so the queries run
+ * unchanged on Postgres too.
  */
 import { randomUUID } from 'node:crypto'
 import type { Db } from './client.ts'
@@ -41,16 +46,18 @@ export interface UserRecord extends User {
   passwordHash: string
 }
 
-export function createUser(
+export async function createUser(
   db: Db,
   input: { email: string; displayName: string; passwordHash: string }
-): UserRecord {
+): Promise<UserRecord> {
   const id = randomUUID()
   const createdAt = nowIso()
-  db.prepare(
-    `INSERT INTO users (id, email, display_name, password_hash, created_at)
+  await db
+    .prepare(
+      `INSERT INTO users (id, email, display_name, password_hash, created_at)
      VALUES (?, ?, ?, ?, ?)`
-  ).run(id, input.email.toLowerCase(), input.displayName, input.passwordHash, createdAt)
+    )
+    .run(id, input.email.toLowerCase(), input.displayName, input.passwordHash, createdAt)
   return {
     id,
     email: input.email.toLowerCase(),
@@ -70,15 +77,15 @@ function mapUser(row: any): UserRecord {
   }
 }
 
-export function getUserByEmail(db: Db, email: string): UserRecord | null {
-  const row = db
+export async function getUserByEmail(db: Db, email: string): Promise<UserRecord | null> {
+  const row = (await db
     .prepare('SELECT * FROM users WHERE email = ?')
-    .get(email.toLowerCase()) as any
+    .get(email.toLowerCase())) as any
   return row ? mapUser(row) : null
 }
 
-export function getUserById(db: Db, userId: string): UserRecord | null {
-  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any
+export async function getUserById(db: Db, userId: string): Promise<UserRecord | null> {
+  const row = (await db.prepare('SELECT * FROM users WHERE id = ?').get(userId)) as any
   return row ? mapUser(row) : null
 }
 
@@ -88,71 +95,76 @@ export function toPublicUser(u: UserRecord): User {
 
 /* --------------------------------------------------------------- sessions */
 
-export function createSession(
+export async function createSession(
   db: Db,
   userId: string,
   ttlMs: number
-): { id: string; expiresAt: string } {
+): Promise<{ id: string; expiresAt: string }> {
   const id = randomUUID()
   const expiresAt = new Date(Date.now() + ttlMs).toISOString()
-  db.prepare(
-    `INSERT INTO sessions (id, user_id, created_at, expires_at)
+  await db
+    .prepare(
+      `INSERT INTO sessions (id, user_id, created_at, expires_at)
      VALUES (?, ?, ?, ?)`
-  ).run(id, userId, nowIso(), expiresAt)
+    )
+    .run(id, userId, nowIso(), expiresAt)
   return { id, expiresAt }
 }
 
 /** Returns the owning user id only for a session that exists, is unrevoked and unexpired. */
-export function resolveSession(db: Db, sessionId: string): string | null {
-  const row = db
-    .prepare(
-      `SELECT user_id, expires_at, revoked_at FROM sessions WHERE id = ?`
-    )
-    .get(sessionId) as any
+export async function resolveSession(db: Db, sessionId: string): Promise<string | null> {
+  const row = (await db
+    .prepare(`SELECT user_id, expires_at, revoked_at FROM sessions WHERE id = ?`)
+    .get(sessionId)) as any
   if (!row || row.revoked_at) return null
   if (new Date(row.expires_at).getTime() <= Date.now()) return null
   return row.user_id as string
 }
 
-export function revokeSession(db: Db, sessionId: string): void {
-  db.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').run(
-    nowIso(),
-    sessionId
-  )
+export async function revokeSession(db: Db, sessionId: string): Promise<void> {
+  await db
+    .prepare('UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL')
+    .run(nowIso(), sessionId)
 }
 
 /* ------------------------------------------------------------ mcp tokens */
 
-export function insertMcpToken(
+export async function insertMcpToken(
   db: Db,
   input: { userId: string; tokenHash: string; label: string; expiresAt: string | null }
-): string {
+): Promise<string> {
   const id = randomUUID()
-  db.prepare(
-    `INSERT INTO mcp_tokens (id, user_id, token_hash, label, created_at, expires_at)
+  await db
+    .prepare(
+      `INSERT INTO mcp_tokens (id, user_id, token_hash, label, created_at, expires_at)
      VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(id, input.userId, input.tokenHash, input.label, nowIso(), input.expiresAt)
+    )
+    .run(id, input.userId, input.tokenHash, input.label, nowIso(), input.expiresAt)
   return id
 }
 
 /** Resolve an MCP bearer token to the user it belongs to. */
-export function resolveMcpToken(
+export async function resolveMcpToken(
   db: Db,
   tokenHash: string
-): { userId: string; tokenId: string } | null {
-  const row = db
+): Promise<{ userId: string; tokenId: string } | null> {
+  const row = (await db
     .prepare(
       `SELECT id, user_id, expires_at, revoked_at FROM mcp_tokens WHERE token_hash = ?`
     )
-    .get(tokenHash) as any
+    .get(tokenHash)) as any
   if (!row || row.revoked_at) return null
   if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) return null
-  db.prepare('UPDATE mcp_tokens SET last_used_at = ? WHERE id = ?').run(nowIso(), row.id)
+  await db.prepare('UPDATE mcp_tokens SET last_used_at = ? WHERE id = ?').run(nowIso(), row.id)
   return { userId: row.user_id, tokenId: row.id }
 }
 
-export function revokeMcpToken(db: Db, userId: string, tokenId: string): boolean {
-  const res = db
+export async function revokeMcpToken(
+  db: Db,
+  userId: string,
+  tokenId: string
+): Promise<boolean> {
+  const res = await db
     .prepare(
       `UPDATE mcp_tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL`
     )
@@ -160,13 +172,13 @@ export function revokeMcpToken(db: Db, userId: string, tokenId: string): boolean
   return Number(res.changes) > 0
 }
 
-export function listMcpTokens(db: Db, userId: string) {
-  const rows = db
+export async function listMcpTokens(db: Db, userId: string) {
+  const rows = (await db
     .prepare(
       `SELECT id, label, created_at, expires_at, revoked_at, last_used_at
        FROM mcp_tokens WHERE user_id = ? ORDER BY created_at DESC`
     )
-    .all(userId) as any[]
+    .all(userId)) as any[]
   return rows.map((r) => ({
     id: r.id,
     label: r.label,
@@ -191,16 +203,18 @@ function mapProject(row: any): Project {
   }
 }
 
-export function createProject(
+export async function createProject(
   db: Db,
   input: { userId: string; title: string; summary?: string | null }
-): Project {
+): Promise<Project> {
   const id = randomUUID()
   const ts = nowIso()
-  db.prepare(
-    `INSERT INTO projects (id, user_id, title, summary, status, created_at, updated_at)
+  await db
+    .prepare(
+      `INSERT INTO projects (id, user_id, title, summary, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, 'active', ?, ?)`
-  ).run(id, input.userId, input.title, input.summary ?? null, ts, ts)
+    )
+    .run(id, input.userId, input.title, input.summary ?? null, ts, ts)
   return {
     id,
     userId: input.userId,
@@ -213,36 +227,38 @@ export function createProject(
 }
 
 /** Ownership-checked project lookup. Returns null for another user's id. */
-export function getProject(db: Db, userId: string, projectId: string): Project | null {
-  const row = db
+export async function getProject(
+  db: Db,
+  userId: string,
+  projectId: string
+): Promise<Project | null> {
+  const row = (await db
     .prepare('SELECT * FROM projects WHERE id = ? AND user_id = ?')
-    .get(projectId, userId) as any
+    .get(projectId, userId)) as any
   return row ? mapProject(row) : null
 }
 
-export function listProjects(db: Db, userId: string): Project[] {
-  const rows = db
+export async function listProjects(db: Db, userId: string): Promise<Project[]> {
+  const rows = (await db
     .prepare('SELECT * FROM projects WHERE user_id = ? ORDER BY updated_at DESC')
-    .all(userId) as any[]
+    .all(userId)) as any[]
   return rows.map(mapProject)
 }
 
-export function touchProject(db: Db, userId: string, projectId: string): void {
-  db.prepare(
-    'UPDATE projects SET updated_at = ? WHERE id = ? AND user_id = ?'
-  ).run(nowIso(), projectId, userId)
+export async function touchProject(db: Db, userId: string, projectId: string): Promise<void> {
+  await db
+    .prepare('UPDATE projects SET updated_at = ? WHERE id = ? AND user_id = ?')
+    .run(nowIso(), projectId, userId)
 }
 
-export function updateProjectSummary(
+export async function updateProjectSummary(
   db: Db,
   userId: string,
   projectId: string,
   summary: string
-): boolean {
-  const res = db
-    .prepare(
-      'UPDATE projects SET summary = ?, updated_at = ? WHERE id = ? AND user_id = ?'
-    )
+): Promise<boolean> {
+  const res = await db
+    .prepare('UPDATE projects SET summary = ?, updated_at = ? WHERE id = ? AND user_id = ?')
     .run(summary, nowIso(), projectId, userId)
   return Number(res.changes) > 0
 }
@@ -263,7 +279,7 @@ function mapConversation(row: any): Conversation {
   }
 }
 
-export function createConversation(
+export async function createConversation(
   db: Db,
   input: {
     userId: string
@@ -271,13 +287,15 @@ export function createConversation(
     channel: ConversationChannel
     title?: string | null
   }
-): Conversation {
+): Promise<Conversation> {
   const id = randomUUID()
   const ts = nowIso()
-  db.prepare(
-    `INSERT INTO conversations (id, user_id, project_id, channel, status, title, created_at, updated_at)
+  await db
+    .prepare(
+      `INSERT INTO conversations (id, user_id, project_id, channel, status, title, created_at, updated_at)
      VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`
-  ).run(id, input.userId, input.projectId ?? null, input.channel, input.title ?? null, ts, ts)
+    )
+    .run(id, input.userId, input.projectId ?? null, input.channel, input.title ?? null, ts, ts)
   return {
     id,
     userId: input.userId,
@@ -291,92 +309,96 @@ export function createConversation(
   }
 }
 
-export function getConversation(
+export async function getConversation(
   db: Db,
   userId: string,
   conversationId: string
-): Conversation | null {
-  const row = db
+): Promise<Conversation | null> {
+  const row = (await db
     .prepare('SELECT * FROM conversations WHERE id = ? AND user_id = ?')
-    .get(conversationId, userId) as any
+    .get(conversationId, userId)) as any
   return row ? mapConversation(row) : null
 }
 
-export function listConversations(db: Db, userId: string, limit = 50): Conversation[] {
-  const rows = db
+export async function listConversations(
+  db: Db,
+  userId: string,
+  limit = 50
+): Promise<Conversation[]> {
+  const rows = (await db
     .prepare(
       'SELECT * FROM conversations WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?'
     )
-    .all(userId, limit) as any[]
+    .all(userId, limit)) as any[]
   return rows.map(mapConversation)
 }
 
-export function listConversationsForProject(
+export async function listConversationsForProject(
   db: Db,
   userId: string,
   projectId: string
-): Conversation[] {
-  const rows = db
+): Promise<Conversation[]> {
+  const rows = (await db
     .prepare(
       `SELECT * FROM conversations WHERE user_id = ? AND project_id = ?
        ORDER BY updated_at DESC`
     )
-    .all(userId, projectId) as any[]
+    .all(userId, projectId)) as any[]
   return rows.map(mapConversation)
 }
 
-export function setConversationStatus(
+export async function setConversationStatus(
   db: Db,
   userId: string,
   conversationId: string,
   status: ConversationStatus
-): boolean {
-  const res = db
-    .prepare(
-      'UPDATE conversations SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?'
-    )
+): Promise<boolean> {
+  const res = await db
+    .prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?')
     .run(status, nowIso(), conversationId, userId)
   return Number(res.changes) > 0
 }
 
-export function setConversationProject(
+export async function setConversationProject(
   db: Db,
   userId: string,
   conversationId: string,
   projectId: string
-): boolean {
-  const res = db
-    .prepare(
-      'UPDATE conversations SET project_id = ?, updated_at = ? WHERE id = ? AND user_id = ?'
-    )
+): Promise<boolean> {
+  const res = await db
+    .prepare('UPDATE conversations SET project_id = ?, updated_at = ? WHERE id = ? AND user_id = ?')
     .run(projectId, nowIso(), conversationId, userId)
   return Number(res.changes) > 0
 }
 
-export function latestConversation(db: Db, userId: string): Conversation | null {
-  const row = db
+export async function latestConversation(
+  db: Db,
+  userId: string
+): Promise<Conversation | null> {
+  const row = (await db
     .prepare(
       `SELECT * FROM conversations WHERE user_id = ?
        ORDER BY COALESCE(last_message_at, updated_at) DESC LIMIT 1`
     )
-    .get(userId) as any
+    .get(userId)) as any
   return row ? mapConversation(row) : null
 }
 
-export function activeConversationForProject(
+export async function activeConversationForProject(
   db: Db,
   userId: string,
   projectId: string
-): Conversation | null {
-  const row = db
+): Promise<Conversation | null> {
+  const row = (await db
     .prepare(
       `SELECT * FROM conversations
        WHERE user_id = ? AND project_id = ? AND status != 'closed'
        ORDER BY COALESCE(last_message_at, updated_at) DESC LIMIT 1`
     )
-    .get(userId, projectId) as any
+    .get(userId, projectId)) as any
   return row ? mapConversation(row) : null
 }
+
 
 /* --------------------------------------------------------------- messages */
 
@@ -398,7 +420,7 @@ function mapMessage(row: any): Message {
  * key already exists for this user, the existing row is returned instead of a
  * duplicate being written — this is what makes a retried request safe.
  */
-export function appendMessage(
+export async function appendMessage(
   db: Db,
   input: {
     userId: string
@@ -408,40 +430,42 @@ export function appendMessage(
     source?: string
     idempotencyKey?: string | null
   }
-): { message: Message; deduplicated: boolean } {
+): Promise<{ message: Message; deduplicated: boolean }> {
   if (input.idempotencyKey) {
-    const existing = db
-      .prepare(
-        `SELECT * FROM messages WHERE user_id = ? AND idempotency_key = ?`
-      )
-      .get(input.userId, input.idempotencyKey) as any
+    const existing = (await db
+      .prepare(`SELECT * FROM messages WHERE user_id = ? AND idempotency_key = ?`)
+      .get(input.userId, input.idempotencyKey)) as any
     if (existing) return { message: mapMessage(existing), deduplicated: true }
   }
 
   // Ownership check on the conversation, so a message can never be appended to
   // someone else's conversation even with a valid-looking conversation id.
-  const convo = getConversation(db, input.userId, input.conversationId)
+  const convo = await getConversation(db, input.userId, input.conversationId)
   if (!convo) throw new Error('conversation_not_found')
 
   const id = randomUUID()
   const ts = nowIso()
-  db.prepare(
-    `INSERT INTO messages (id, conversation_id, user_id, role, content, source, created_at, idempotency_key)
+  await db
+    .prepare(
+      `INSERT INTO messages (id, conversation_id, user_id, role, content, source, created_at, idempotency_key)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    input.conversationId,
-    input.userId,
-    input.role,
-    input.content,
-    input.source ?? 'web',
-    ts,
-    input.idempotencyKey ?? null
-  )
-  db.prepare(
-    `UPDATE conversations SET updated_at = ?, last_message_at = ? WHERE id = ? AND user_id = ?`
-  ).run(ts, ts, convo.id, input.userId)
-  if (convo.projectId) touchProject(db, input.userId, convo.projectId)
+    )
+    .run(
+      id,
+      input.conversationId,
+      input.userId,
+      input.role,
+      input.content,
+      input.source ?? 'web',
+      ts,
+      input.idempotencyKey ?? null
+    )
+  await db
+    .prepare(
+      `UPDATE conversations SET updated_at = ?, last_message_at = ? WHERE id = ? AND user_id = ?`
+    )
+    .run(ts, ts, convo.id, input.userId)
+  if (convo.projectId) await touchProject(db, input.userId, convo.projectId)
 
   return {
     message: {
@@ -458,33 +482,33 @@ export function appendMessage(
   }
 }
 
-export function listMessages(
+export async function listMessages(
   db: Db,
   userId: string,
   conversationId: string,
   limit = 200
-): Message[] {
-  const rows = db
+): Promise<Message[]> {
+  const rows = (await db
     .prepare(
       `SELECT * FROM messages WHERE conversation_id = ? AND user_id = ?
-       ORDER BY created_at ASC, rowid ASC LIMIT ?`
+       ORDER BY created_at ASC, id ASC LIMIT ?`
     )
-    .all(conversationId, userId, limit) as any[]
+    .all(conversationId, userId, limit)) as any[]
   return rows.map(mapMessage)
 }
 
-export function lastMessageByRole(
+export async function lastMessageByRole(
   db: Db,
   userId: string,
   conversationId: string,
   role: MessageRole
-): Message | null {
-  const row = db
+): Promise<Message | null> {
+  const row = (await db
     .prepare(
       `SELECT * FROM messages WHERE conversation_id = ? AND user_id = ? AND role = ?
-       ORDER BY created_at DESC, rowid DESC LIMIT 1`
+       ORDER BY created_at DESC, id DESC LIMIT 1`
     )
-    .get(conversationId, userId, role) as any
+    .get(conversationId, userId, role)) as any
   return row ? mapMessage(row) : null
 }
 
@@ -508,7 +532,7 @@ function mapAction(row: any): NextAction {
  * Propose a next action. Idempotent on `(userId, idempotencyKey)`: a retried
  * request returns the existing action rather than creating a second one.
  */
-export function proposeNextAction(
+export async function proposeNextAction(
   db: Db,
   input: {
     userId: string
@@ -518,29 +542,31 @@ export function proposeNextAction(
     detail?: string | null
     idempotencyKey?: string | null
   }
-): { action: NextAction; deduplicated: boolean } {
+): Promise<{ action: NextAction; deduplicated: boolean }> {
   if (input.idempotencyKey) {
-    const existing = db
+    const existing = (await db
       .prepare('SELECT * FROM next_actions WHERE user_id = ? AND idempotency_key = ?')
-      .get(input.userId, input.idempotencyKey) as any
+      .get(input.userId, input.idempotencyKey)) as any
     if (existing) return { action: mapAction(existing), deduplicated: true }
   }
 
   const id = randomUUID()
   const ts = nowIso()
-  db.prepare(
-    `INSERT INTO next_actions (id, user_id, project_id, conversation_id, title, detail, status, created_at, idempotency_key)
+  await db
+    .prepare(
+      `INSERT INTO next_actions (id, user_id, project_id, conversation_id, title, detail, status, created_at, idempotency_key)
      VALUES (?, ?, ?, ?, ?, ?, 'proposed', ?, ?)`
-  ).run(
-    id,
-    input.userId,
-    input.projectId ?? null,
-    input.conversationId ?? null,
-    input.title,
-    input.detail ?? null,
-    ts,
-    input.idempotencyKey ?? null
-  )
+    )
+    .run(
+      id,
+      input.userId,
+      input.projectId ?? null,
+      input.conversationId ?? null,
+      input.title,
+      input.detail ?? null,
+      ts,
+      input.idempotencyKey ?? null
+    )
   return {
     action: {
       id,
@@ -557,59 +583,63 @@ export function proposeNextAction(
   }
 }
 
-export function getAction(db: Db, userId: string, actionId: string): NextAction | null {
-  const row = db
+export async function getAction(
+  db: Db,
+  userId: string,
+  actionId: string
+): Promise<NextAction | null> {
+  const row = (await db
     .prepare('SELECT * FROM next_actions WHERE id = ? AND user_id = ?')
-    .get(actionId, userId) as any
+    .get(actionId, userId)) as any
   return row ? mapAction(row) : null
 }
 
-export function listOpenActions(
+export async function listOpenActions(
   db: Db,
   userId: string,
   projectId?: string | null,
   limit = 20
-): NextAction[] {
+): Promise<NextAction[]> {
   const rows = projectId
-    ? (db
+    ? ((await db
         .prepare(
           `SELECT * FROM next_actions
            WHERE user_id = ? AND project_id = ? AND status IN ('proposed','accepted')
            ORDER BY created_at DESC LIMIT ?`
         )
-        .all(userId, projectId, limit) as any[])
-    : (db
+        .all(userId, projectId, limit)) as any[])
+    : ((await db
         .prepare(
           `SELECT * FROM next_actions
            WHERE user_id = ? AND status IN ('proposed','accepted')
            ORDER BY created_at DESC LIMIT ?`
         )
-        .all(userId, limit) as any[])
+        .all(userId, limit)) as any[])
   return rows.map(mapAction)
 }
 
-export function latestActionForConversation(
+export async function latestActionForConversation(
   db: Db,
   userId: string,
   conversationId: string
-): NextAction | null {
-  const row = db
+): Promise<NextAction | null> {
+  const row = (await db
     .prepare(
       `SELECT * FROM next_actions WHERE user_id = ? AND conversation_id = ?
-       ORDER BY created_at DESC, rowid DESC LIMIT 1`
+       ORDER BY created_at DESC, id DESC LIMIT 1`
     )
-    .get(userId, conversationId) as any
+    .get(userId, conversationId)) as any
   return row ? mapAction(row) : null
 }
 
-export function setActionStatus(
+export async function setActionStatus(
   db: Db,
   userId: string,
   actionId: string,
   status: NextActionStatus
-): boolean {
+): Promise<boolean> {
   const completedAt = status === 'done' ? nowIso() : null
-  const res = db
+  const res = await db
     .prepare(
       `UPDATE next_actions SET status = ?, completed_at = ? WHERE id = ? AND user_id = ?`
     )
@@ -634,7 +664,7 @@ function mapFact(row: any): Fact {
   }
 }
 
-export function createFact(
+export async function createFact(
   db: Db,
   input: {
     userId: string
@@ -644,23 +674,25 @@ export function createFact(
     sourceRef?: string | null
     confidence?: FactConfidence
   }
-): Fact {
+): Promise<Fact> {
   const id = randomUUID()
   const ts = nowIso()
-  db.prepare(
-    `INSERT INTO facts (id, user_id, project_id, content, source, source_ref, confidence, created_at, updated_at)
+  await db
+    .prepare(
+      `INSERT INTO facts (id, user_id, project_id, content, source, source_ref, confidence, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    input.userId,
-    input.projectId ?? null,
-    input.content,
-    input.source,
-    input.sourceRef ?? null,
-    input.confidence ?? 'stated',
-    ts,
-    ts
-  )
+    )
+    .run(
+      id,
+      input.userId,
+      input.projectId ?? null,
+      input.content,
+      input.source,
+      input.sourceRef ?? null,
+      input.confidence ?? 'stated',
+      ts,
+      ts
+    )
   return {
     id,
     userId: input.userId,
@@ -675,27 +707,36 @@ export function createFact(
   }
 }
 
-export function listFacts(db: Db, userId: string, projectId?: string | null, limit = 100): Fact[] {
+export async function listFacts(
+  db: Db,
+  userId: string,
+  projectId?: string | null,
+  limit = 100
+): Promise<Fact[]> {
   const rows = projectId
-    ? (db
+    ? ((await db
         .prepare(
           `SELECT * FROM facts WHERE user_id = ? AND project_id = ? AND deleted_at IS NULL
            ORDER BY updated_at DESC LIMIT ?`
         )
-        .all(userId, projectId, limit) as any[])
-    : (db
+        .all(userId, projectId, limit)) as any[])
+    : ((await db
         .prepare(
           `SELECT * FROM facts WHERE user_id = ? AND deleted_at IS NULL
            ORDER BY updated_at DESC LIMIT ?`
         )
-        .all(userId, limit) as any[])
+        .all(userId, limit)) as any[])
   return rows.map(mapFact)
 }
 
-export function getFact(db: Db, userId: string, factId: string): Fact | null {
-  const row = db
+export async function getFact(
+  db: Db,
+  userId: string,
+  factId: string
+): Promise<Fact | null> {
+  const row = (await db
     .prepare('SELECT * FROM facts WHERE id = ? AND user_id = ? AND deleted_at IS NULL')
-    .get(factId, userId) as any
+    .get(factId, userId)) as any
   return row ? mapFact(row) : null
 }
 
@@ -703,26 +744,40 @@ export function getFact(db: Db, userId: string, factId: string): Fact | null {
  * Correct a fact in place. The previous text is retained on the row so the user
  * can see what changed, and the edit is written to the audit log by the caller.
  */
-export function correctFact(
+export async function correctFact(
   db: Db,
   userId: string,
   factId: string,
   newContent: string
-): Fact | null {
-  const existing = getFact(db, userId, factId)
+): Promise<Fact | null> {
+  const existing = await getFact(db, userId, factId)
   if (!existing) return null
   const ts = nowIso()
-  db.prepare(
-    `UPDATE facts SET content = ?, updated_at = ?, corrected_from = ?, source = 'user_correction'
+  await db
+    .prepare(
+      `UPDATE facts SET content = ?, updated_at = ?, corrected_from = ?, source = 'user_correction'
      WHERE id = ? AND user_id = ?`
-  ).run(newContent, ts, existing.content, factId, userId)
-  return { ...existing, content: newContent, updatedAt: ts, correctedFrom: existing.content, source: 'user_correction' }
+    )
+    .run(newContent, ts, existing.content, factId, userId)
+  return {
+    ...existing,
+    content: newContent,
+    updatedAt: ts,
+    correctedFrom: existing.content,
+    source: 'user_correction',
+  }
 }
 
 /** Soft delete so the user's correction history stays auditable. */
-export function deleteFact(db: Db, userId: string, factId: string): boolean {
-  const res = db
-    .prepare('UPDATE facts SET deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL')
+export async function deleteFact(
+  db: Db,
+  userId: string,
+  factId: string
+): Promise<boolean> {
+  const res = await db
+    .prepare(
+      'UPDATE facts SET deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL'
+    )
     .run(nowIso(), nowIso(), factId, userId)
   return Number(res.changes) > 0
 }
@@ -742,7 +797,7 @@ function mapLink(row: any): TelegramLink {
   }
 }
 
-export function insertTelegramLink(
+export async function insertTelegramLink(
   db: Db,
   input: {
     userId: string
@@ -750,20 +805,22 @@ export function insertTelegramLink(
     telegramUserId?: string | null
     telegramUsername?: string | null
   }
-): TelegramLink {
+): Promise<TelegramLink> {
   const id = randomUUID()
   const ts = nowIso()
-  db.prepare(
-    `INSERT INTO telegram_links (id, user_id, telegram_chat_id, telegram_user_id, telegram_username, linked_at)
+  await db
+    .prepare(
+      `INSERT INTO telegram_links (id, user_id, telegram_chat_id, telegram_user_id, telegram_username, linked_at)
      VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    input.userId,
-    input.telegramChatId,
-    input.telegramUserId ?? null,
-    input.telegramUsername ?? null,
-    ts
-  )
+    )
+    .run(
+      id,
+      input.userId,
+      input.telegramChatId,
+      input.telegramUserId ?? null,
+      input.telegramUsername ?? null,
+      ts
+    )
   return {
     id,
     userId: input.userId,
@@ -780,26 +837,27 @@ export function insertTelegramLink(
  * Resolve a Telegram chat to the pilot user it is linked to.
  * This is the only supported way to authorize a Telegram message.
  */
-export function getActiveLinkByChatId(db: Db, telegramChatId: string): TelegramLink | null {
-  const row = db
+export async function getActiveLinkByChatId(
+  db: Db,
+  telegramChatId: string
+): Promise<TelegramLink | null> {
+  const row = (await db
     .prepare(
       'SELECT * FROM telegram_links WHERE telegram_chat_id = ? AND unlinked_at IS NULL'
     )
-    .get(telegramChatId) as any
+    .get(telegramChatId)) as any
   return row ? mapLink(row) : null
 }
 
-export function listLinksForUser(db: Db, userId: string): TelegramLink[] {
-  const rows = db
-    .prepare(
-      'SELECT * FROM telegram_links WHERE user_id = ? ORDER BY linked_at DESC'
-    )
-    .all(userId) as any[]
+export async function listLinksForUser(db: Db, userId: string): Promise<TelegramLink[]> {
+  const rows = (await db
+    .prepare('SELECT * FROM telegram_links WHERE user_id = ? ORDER BY linked_at DESC')
+    .all(userId)) as any[]
   return rows.map(mapLink)
 }
 
-export function unlinkTelegramChat(db: Db, telegramChatId: string): boolean {
-  const res = db
+export async function unlinkTelegramChat(db: Db, telegramChatId: string): Promise<boolean> {
+  const res = await db
     .prepare(
       'UPDATE telegram_links SET unlinked_at = ? WHERE telegram_chat_id = ? AND unlinked_at IS NULL'
     )
@@ -807,8 +865,8 @@ export function unlinkTelegramChat(db: Db, telegramChatId: string): boolean {
   return Number(res.changes) > 0
 }
 
-export function unlinkAllForUser(db: Db, userId: string): number {
-  const res = db
+export async function unlinkAllForUser(db: Db, userId: string): Promise<number> {
+  const res = await db
     .prepare(
       'UPDATE telegram_links SET unlinked_at = ? WHERE user_id = ? AND unlinked_at IS NULL'
     )
@@ -816,13 +874,13 @@ export function unlinkAllForUser(db: Db, userId: string): number {
   return Number(res.changes)
 }
 
-export function setLinkActiveProject(
+export async function setLinkActiveProject(
   db: Db,
   userId: string,
   telegramChatId: string,
   projectId: string | null
-): boolean {
-  const res = db
+): Promise<boolean> {
+  const res = await db
     .prepare(
       `UPDATE telegram_links SET active_project_id = ?
        WHERE telegram_chat_id = ? AND user_id = ? AND unlinked_at IS NULL`
@@ -871,7 +929,7 @@ function mapRun(row: any): ModelRunRow {
   }
 }
 
-export function createModelRun(
+export async function createModelRun(
   db: Db,
   input: {
     userId: string
@@ -882,23 +940,25 @@ export function createModelRun(
     model?: string | null
     endpoint?: string | null
   }
-): ModelRunRow {
+): Promise<ModelRunRow> {
   const id = randomUUID()
   const ts = nowIso()
-  db.prepare(
-    `INSERT INTO model_runs (id, user_id, conversation_id, idempotency_key, purpose, status, provider, model, endpoint, created_at)
+  await db
+    .prepare(
+      `INSERT INTO model_runs (id, user_id, conversation_id, idempotency_key, purpose, status, provider, model, endpoint, created_at)
      VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`
-  ).run(
-    id,
-    input.userId,
-    input.conversationId ?? null,
-    input.idempotencyKey,
-    input.purpose,
-    input.provider ?? null,
-    input.model ?? null,
-    input.endpoint ?? null,
-    ts
-  )
+    )
+    .run(
+      id,
+      input.userId,
+      input.conversationId ?? null,
+      input.idempotencyKey,
+      input.purpose,
+      input.provider ?? null,
+      input.model ?? null,
+      input.endpoint ?? null,
+      ts
+    )
   return {
     id,
     userId: input.userId,
@@ -918,47 +978,53 @@ export function createModelRun(
   }
 }
 
-export function getModelRunByKey(
+export async function getModelRunByKey(
   db: Db,
   userId: string,
   idempotencyKey: string
-): ModelRunRow | null {
-  const row = db
+): Promise<ModelRunRow | null> {
+  const row = (await db
     .prepare('SELECT * FROM model_runs WHERE user_id = ? AND idempotency_key = ?')
-    .get(userId, idempotencyKey) as any
+    .get(userId, idempotencyKey)) as any
   return row ? mapRun(row) : null
 }
 
-export function completeModelRun(
+export async function completeModelRun(
   db: Db,
   runId: string,
   input: { responseText: string; latencyMs: number; provider: string; model: string }
-): void {
-  db.prepare(
-    `UPDATE model_runs SET status = 'succeeded', response_text = ?, latency_ms = ?,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE model_runs SET status = 'succeeded', response_text = ?, latency_ms = ?,
        provider = ?, model = ?, completed_at = ?, error_code = NULL, error_message = NULL
      WHERE id = ?`
-  ).run(input.responseText, input.latencyMs, input.provider, input.model, nowIso(), runId)
+    )
+    .run(input.responseText, input.latencyMs, input.provider, input.model, nowIso(), runId)
 }
 
-export function failModelRun(
+export async function failModelRun(
   db: Db,
   runId: string,
   input: { errorCode: string; errorMessage: string; latencyMs?: number | null }
-): void {
-  db.prepare(
-    `UPDATE model_runs SET status = 'failed', error_code = ?, error_message = ?,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE model_runs SET status = 'failed', error_code = ?, error_message = ?,
        latency_ms = ?, completed_at = ?
      WHERE id = ?`
-  ).run(input.errorCode, input.errorMessage, input.latencyMs ?? null, nowIso(), runId)
+    )
+    .run(input.errorCode, input.errorMessage, input.latencyMs ?? null, nowIso(), runId)
 }
 
-export function recentModelRuns(db: Db, userId: string, limit = 20): ModelRunRow[] {
-  const rows = db
-    .prepare(
-      'SELECT * FROM model_runs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?'
-    )
-    .all(userId, limit) as any[]
+export async function recentModelRuns(
+  db: Db,
+  userId: string,
+  limit = 20
+): Promise<ModelRunRow[]> {
+  const rows = (await db
+    .prepare('SELECT * FROM model_runs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?')
+    .all(userId, limit)) as any[]
   return rows.map(mapRun)
 }
 
@@ -967,29 +1033,31 @@ export function recentModelRuns(db: Db, userId: string, limit = 20): ModelRunRow
  * be retried. One row per (user, key) is what the unique index enforces, so a
  * retry reuses the row instead of inserting a second attempt.
  */
-export function resetModelRun(db: Db, runId: string): void {
-  db.prepare(
-    `UPDATE model_runs SET status = 'pending', error_code = NULL, error_message = NULL,
+export async function resetModelRun(db: Db, runId: string): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE model_runs SET status = 'pending', error_code = NULL, error_message = NULL,
        completed_at = NULL
      WHERE id = ?`
-  ).run(runId)
+    )
+    .run(runId)
 }
 
 /** Fetch a stored message by its idempotency key, used when replaying a turn. */
-export function getMessageByKey(
+export async function getMessageByKey(
   db: Db,
   userId: string,
   idempotencyKey: string
-): Message | null {
-  const row = db
+): Promise<Message | null> {
+  const row = (await db
     .prepare('SELECT * FROM messages WHERE user_id = ? AND idempotency_key = ?')
-    .get(userId, idempotencyKey) as any
+    .get(userId, idempotencyKey)) as any
   return row ? mapMessage(row) : null
 }
 
 /* ---------------------------------------------------------------- outbox */
 
-export function enqueueOutbox(
+export async function enqueueOutbox(
   db: Db,
   input: {
     userId?: string | null
@@ -999,44 +1067,53 @@ export function enqueueOutbox(
     gateway: string
     status?: string
   }
-): string {
+): Promise<string> {
   const id = randomUUID()
-  db.prepare(
-    `INSERT INTO telegram_outbox (id, user_id, chat_id, body, purpose, gateway, status, created_at)
+  await db
+    .prepare(
+      `INSERT INTO telegram_outbox (id, user_id, chat_id, body, purpose, gateway, status, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    input.userId ?? null,
-    input.chatId,
-    input.body,
-    input.purpose,
-    input.gateway,
-    input.status ?? 'queued',
-    nowIso()
-  )
+    )
+    .run(
+      id,
+      input.userId ?? null,
+      input.chatId,
+      input.body,
+      input.purpose,
+      input.gateway,
+      input.status ?? 'queued',
+      nowIso()
+    )
   return id
 }
 
-export function markOutbox(
+export async function markOutbox(
   db: Db,
   id: string,
-  input: { status: string; sentAt?: string | null; error?: string | null; externalId?: string | null }
-): void {
-  db.prepare(
-    `UPDATE telegram_outbox SET status = ?, sent_at = ?, error = ?, external_id = ? WHERE id = ?`
-  ).run(
-    input.status,
-    input.sentAt ?? null,
-    input.error ?? null,
-    input.externalId ?? null,
-    id
-  )
+  input: {
+    status: string
+    sentAt?: string | null
+    error?: string | null
+    externalId?: string | null
+  }
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE telegram_outbox SET status = ?, sent_at = ?, error = ?, external_id = ? WHERE id = ?`
+    )
+    .run(
+      input.status,
+      input.sentAt ?? null,
+      input.error ?? null,
+      input.externalId ?? null,
+      id
+    )
 }
 
-export function listOutbox(db: Db, limit = 50) {
-  const rows = db
+export async function listOutbox(db: Db, limit = 50) {
+  const rows = (await db
     .prepare('SELECT * FROM telegram_outbox ORDER BY created_at DESC LIMIT ?')
-    .all(limit) as any[]
+    .all(limit)) as any[]
   return rows.map((r) => ({
     id: r.id,
     userId: r.user_id,
@@ -1081,7 +1158,7 @@ function mapDraft(row: any): ContentDraft {
   }
 }
 
-export function createContentDraft(
+export async function createContentDraft(
   db: Db,
   input: {
     userId: string
@@ -1094,27 +1171,29 @@ export function createContentDraft(
     source: string
     model?: string | null
   }
-): ContentDraft {
+): Promise<ContentDraft> {
   const id = randomUUID()
   const ts = nowIso()
   const payloadJson = JSON.stringify(input.payload ?? {})
-  db.prepare(
-    `INSERT INTO content_drafts
+  await db
+    .prepare(
+      `INSERT INTO content_drafts
        (id, user_id, project_id, kind, channel, title, body, payload_json, source, model, status, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?)`
-  ).run(
-    id,
-    input.userId,
-    input.projectId ?? null,
-    input.kind,
-    input.channel,
-    input.title ?? null,
-    input.body,
-    payloadJson,
-    input.source,
-    input.model ?? null,
-    ts
-  )
+    )
+    .run(
+      id,
+      input.userId,
+      input.projectId ?? null,
+      input.kind,
+      input.channel,
+      input.title ?? null,
+      input.body,
+      payloadJson,
+      input.source,
+      input.model ?? null,
+      ts
+    )
   return {
     id,
     userId: input.userId,
@@ -1132,15 +1211,15 @@ export function createContentDraft(
   }
 }
 
-export function listContentDrafts(
+export async function listContentDrafts(
   db: Db,
   userId: string,
   opts: { kind?: DraftKind | null; projectId?: string | null; limit?: number } = {}
-): ContentDraft[] {
+): Promise<ContentDraft[]> {
   const limit = opts.limit ?? 60
   const where = ['user_id = ?', 'deleted_at IS NULL']
-  // `any[]` because the params are appended conditionally and node:sqlite types
-  // its bind values as a union we would otherwise have to narrow by hand.
+  // `any[]` because the params are appended conditionally and the bind values
+  // are a mixed union we would otherwise have to narrow by hand.
   const params: any[] = [userId]
   if (opts.kind) {
     where.push('kind = ?')
@@ -1150,19 +1229,25 @@ export function listContentDrafts(
     where.push('project_id = ?')
     params.push(opts.projectId)
   }
-  const rows = db
+  const rows = (await db
     .prepare(
       `SELECT * FROM content_drafts WHERE ${where.join(' AND ')}
        ORDER BY created_at DESC LIMIT ?`
     )
-    .all(...params, limit) as any[]
+    .all(...params, limit)) as any[]
   return rows.map(mapDraft)
 }
 
-export function getContentDraft(db: Db, userId: string, draftId: string): ContentDraft | null {
-  const row = db
-    .prepare('SELECT * FROM content_drafts WHERE id = ? AND user_id = ? AND deleted_at IS NULL')
-    .get(draftId, userId) as any
+export async function getContentDraft(
+  db: Db,
+  userId: string,
+  draftId: string
+): Promise<ContentDraft | null> {
+  const row = (await db
+    .prepare(
+      'SELECT * FROM content_drafts WHERE id = ? AND user_id = ? AND deleted_at IS NULL'
+    )
+    .get(draftId, userId)) as any
   return row ? mapDraft(row) : null
 }
 
@@ -1171,8 +1256,12 @@ export function getContentDraft(db: Db, userId: string, draftId: string): Conten
  * row is still there for an audit trail. Ownership is part of the WHERE clause:
  * another user's draft id changes nothing and reports false.
  */
-export function deleteContentDraft(db: Db, userId: string, draftId: string): boolean {
-  const res = db
+export async function deleteContentDraft(
+  db: Db,
+  userId: string,
+  draftId: string
+): Promise<boolean> {
+  const res = await db
     .prepare(
       'UPDATE content_drafts SET deleted_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL'
     )
@@ -1182,11 +1271,13 @@ export function deleteContentDraft(db: Db, userId: string, draftId: string): boo
 
 /* ----------------------------------------------------------------- audit */
 
-export function audit(
+export async function audit(
   db: Db,
   input: { userId?: string | null; action: string; detail?: string | null }
-): void {
-  db.prepare(
-    'INSERT INTO audit_log (id, user_id, action, detail, created_at) VALUES (?, ?, ?, ?, ?)'
-  ).run(randomUUID(), input.userId ?? null, input.action, input.detail ?? null, nowIso())
+): Promise<void> {
+  await db
+    .prepare(
+      'INSERT INTO audit_log (id, user_id, action, detail, created_at) VALUES (?, ?, ?, ?, ?)'
+    )
+    .run(randomUUID(), input.userId ?? null, input.action, input.detail ?? null, nowIso())
 }

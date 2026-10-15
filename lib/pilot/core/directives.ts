@@ -65,20 +65,20 @@ export function detectNumericChoice(text: string): number | null {
  * Build the "where was I?" card for a conversation. Reads only records owned by
  * `userId`; a conversation id belonging to someone else yields null.
  */
-export function buildReentryCard(
+export async function buildReentryCard(
   db: Db,
   userId: string,
   conversationId: string
-): ReentryCard | null {
-  const conversation = repo.getConversation(db, userId, conversationId)
+): Promise<ReentryCard | null> {
+  const conversation = await repo.getConversation(db, userId, conversationId)
   if (!conversation) return null
 
   const project = conversation.projectId
-    ? repo.getProject(db, userId, conversation.projectId)
+    ? await repo.getProject(db, userId, conversation.projectId)
     : null
-  const lastUser = repo.lastMessageByRole(db, userId, conversationId, 'user')
-  const lastAssistant = repo.lastMessageByRole(db, userId, conversationId, 'assistant')
-  const nextAction = repo.latestActionForConversation(db, userId, conversationId)
+  const lastUser = await repo.lastMessageByRole(db, userId, conversationId, 'user')
+  const lastAssistant = await repo.lastMessageByRole(db, userId, conversationId, 'assistant')
+  const nextAction = await repo.latestActionForConversation(db, userId, conversationId)
 
   // The open question is the most recent assistant question that the user has
   // not answered yet.
@@ -104,13 +104,13 @@ export function buildReentryCard(
         ? nextAction
         : null,
     savedForLater: conversation.status === 'saved_for_later',
-    recentFacts: repo.listFacts(db, userId, conversation.projectId ?? undefined, 5),
+    recentFacts: await repo.listFacts(db, userId, conversation.projectId ?? undefined, 5),
   }
 }
 
 /** Most recently touched conversation for a user, preferring unsaved ones. */
-export function findResumeTarget(db: Db, userId: string): string | null {
-  const conversations = repo.listConversations(db, userId, 20)
+export async function findResumeTarget(db: Db, userId: string): Promise<string | null> {
+  const conversations = await repo.listConversations(db, userId, 20)
   const active = conversations.find((c) => c.status === 'active')
   return (active ?? conversations[0])?.id ?? null
 }

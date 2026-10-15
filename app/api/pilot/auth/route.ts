@@ -36,7 +36,7 @@ export async function POST(request: Request) {
 
   if (action === 'signout') {
     const sessionId = store.get('cop_session')?.value
-    if (sessionId) repo.revokeSession(db, sessionId)
+    if (sessionId) await repo.revokeSession(db, sessionId)
     store.set(clearedSessionCookie())
     return NextResponse.json({ ok: true })
   }
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
   const displayName = body?.displayName ? String(body.displayName) : undefined
 
   if (action === 'register') {
-    const created = registerAccount(db, { email, password, displayName })
+    const created = await registerAccount(db, { email, password, displayName })
     if (!created.ok) {
       return NextResponse.json(
         { ok: false, error: ERROR_TEXT[created.error ?? ''] ?? 'Could not create the account.' },
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const result = signIn(db, { email, password })
+  const result = await signIn(db, { email, password })
   if (!result.ok || !result.sessionId) {
     return NextResponse.json(
       { ok: false, error: ERROR_TEXT[result.error ?? ''] ?? 'Sign-in failed.' },
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
     )
   }
 
-  const user = repo.getUserById(db, result.userId!)
+  const user = await repo.getUserById(db, result.userId!)
   store.set(sessionCookie(result.sessionId, Math.floor(SESSION_TTL_MS / 1000)))
 
   return NextResponse.json({

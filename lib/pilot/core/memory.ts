@@ -7,7 +7,7 @@
  * deletion is a soft delete, so the record cannot silently reappear in a prompt.
  *
  * Nothing here is ever read from the user's personal Hermes memory. The pilot
- * store is this SQLite file and only this file.
+ * store is the Neon/SQLite `Db` and only that store.
  */
 import type { Db } from '../db/client.ts'
 import * as repo from '../db/repo.ts'
@@ -23,7 +23,7 @@ export interface FactChange {
  * Record facts observed during a turn. Duplicates by content are skipped, so a
  * retried turn cannot inflate the memory with the same statement twice.
  */
-export function recordObservedFacts(
+export async function recordObservedFacts(
   db: Db,
   input: {
     userId: string
@@ -32,9 +32,11 @@ export function recordObservedFacts(
     source: string
     sourceRef?: string | null
   }
-): { created: Fact[]; skippedDuplicates: number } {
+): Promise<{ created: Fact[]; skippedDuplicates: number }> {
   const existing = new Set(
-    repo.listFacts(db, input.userId, input.projectId ?? undefined, 500).map((f) => normalise(f.content))
+    (await repo.listFacts(db, input.userId, input.projectId ?? undefined, 500)).map((f) =>
+      normalise(f.content)
+    )
   )
   const created: Fact[] = []
   let skippedDuplicates = 0
@@ -49,7 +51,7 @@ export function recordObservedFacts(
     }
     existing.add(key)
     created.push(
-      repo.createFact(db, {
+      await repo.createFact(db, {
         userId: input.userId,
         projectId: input.projectId ?? null,
         content,
@@ -63,27 +65,31 @@ export function recordObservedFacts(
   return { created, skippedDuplicates }
 }
 
-export function listFacts(db: Db, userId: string, projectId?: string | null): Fact[] {
+export async function listFacts(
+  db: Db,
+  userId: string,
+  projectId?: string | null
+): Promise<Fact[]> {
   return repo.listFacts(db, userId, projectId ?? undefined, 500)
 }
 
 /** Correct a remembered fact. The previous value stays traceable. */
-export function correctFact(
+export async function correctFact(
   db: Db,
   userId: string,
   factId: string,
   newContent: string
-): FactChange {
+): Promise<FactChange> {
   const trimmed = newContent.trim()
   if (!trimmed) return { ok: false, fact: null, reason: 'empty' }
 
-  const before = repo.getFact(db, userId, factId)
+  const before = await repo.getFact(db, userId, factId)
   if (!before) return { ok: false, fact: null, reason: 'not_found' }
 
-  const updated = repo.correctFact(db, userId, factId, trimmed)
+  const updated = await repo.correctFact(db, userId, factId, trimmed)
   if (!updated) return { ok: false, fact: null, reason: 'not_found' }
 
-  repo.audit(db, {
+  await repo.audit(db, {
     userId,
     action: 'fact_corrected',
     detail: JSON.stringify({ factId, previousContent: before.content }),
@@ -92,14 +98,18 @@ export function correctFact(
 }
 
 /** Delete a remembered fact so it stops being used as context. */
-export function deleteFact(db: Db, userId: string, factId: string): FactChange {
-  const before = repo.getFact(db, userId, factId)
+export async function deleteFact(
+  db: Db,
+  userId: string,
+  factId: string
+): Promise<FactChange> {
+  const before = await repo.getFact(db, userId, factId)
   if (!before) return { ok: false, fact: null, reason: 'not_found' }
 
-  const removed = repo.deleteFact(db, userId, factId)
+  const removed = await repo.deleteFact(db, userId, factId)
   if (!removed) return { ok: false, fact: null, reason: 'not_found' }
 
-  repo.audit(db, {
+  await repo.audit(db, {
     userId,
     action: 'fact_deleted',
     detail: JSON.stringify({ factId, previousContent: before.content }),
