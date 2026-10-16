@@ -1,9 +1,16 @@
 /**
  * Pilot account sign-in / sign-out.
  *
- * Three-person pilot, so registration is open but rate-limited by nothing more
- * than a password length rule. Sessions are httpOnly cookies; the browser never
- * holds a user id it could tamper with, and never holds a model API key.
+ * Sessions are httpOnly cookies; the browser never holds a user id it could
+ * tamper with, and never holds a model API key.
+ *
+ * Registration is gated by PILOT_REGISTRATION_MODE. When it is set to
+ * "waitlist", an email may only create an account if it is on the public
+ * waitlist (newsletter_subscribers) or in the PILOT_ALLOWED_EMAILS allowlist.
+ * This is what keeps a link posted on LinkedIn from turning into open sign-ups
+ * that burn inference credits. Sign-in is never gated, so the existing pilot
+ * members are unaffected. With the mode unset, registration stays open (dev /
+ * test default).
  */
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
@@ -20,6 +27,27 @@ const ERROR_TEXT: Record<string, string> = {
   weak_password: 'Use at least 10 characters for your password.',
   email_taken: 'That email already has a pilot account. Sign in instead.',
   invalid_credentials: 'Email and password do not match.',
+}
+
+const WAITLIST_HINT =
+  'Creator OS is invite-only right now. Join the waitlist at creatoros.indigos.uk and we\u2019ll email you a link the moment a spot opens.'
+
+/**
+ * True when this email may create an account. Only enforced while
+ * PILOT_REGISTRATION_MODE === 'waitlist'. A public-figure link must not open a
+ * floodgate of paid model runs, so: explicit allowlist first (owner fast-track),
+ * then the waitlist table. If neither matches, the caller gets WAITLIST_HINT.
+ */
+async function registrationAllowed(db: ReturnType<typeof getDb>, email: string): Promise<boolean> {
+  if (process.env.PILOT_REGISTRATION_MODE !== 'waitlist') return true
+  const norm = email.trim().toLowerCase()
+  if (!norm) return false
+  const allowlist = (process.env.PILOT_ALLOWED_EMAILS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+  if (allowlist.includes(norm)) return true
+  return repo.isOnWaitlist(db, norm)
 }
 
 export async function POST(request: Request) {
@@ -50,6 +78,9 @@ export async function POST(request: Request) {
   const displayName = body?.displayName ? String(body.displayName) : undefined
 
   if (action === 'register') {
+    if (!(await registrationAllowed(db, email))) {
+      return NextResponse.json({ ok: false, error: WAITLIST_HINT }, { status: 403 })
+    }
     const created = await registerAccount(db, { email, password, displayName })
     if (!created.ok) {
       return NextResponse.json(

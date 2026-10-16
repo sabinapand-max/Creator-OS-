@@ -84,6 +84,26 @@ export async function getUserByEmail(db: Db, email: string): Promise<UserRecord 
   return row ? mapUser(row) : null
 }
 
+/**
+ * Is this email on the public waitlist?
+ *
+ * `newsletter_subscribers` is written by the landing page's /api/subscribe, not
+ * by this app's schema, so in a fresh/test database the table may not exist at
+ * all. We treat "table absent" as "not on the list" rather than throwing, so a
+ * missing table can never crash sign-up or silently open the floodgate. The
+ * registration gate combines this with an explicit env allowlist.
+ */
+export async function isOnWaitlist(db: Db, email: string): Promise<boolean> {
+  try {
+    const row = await db
+      .prepare('SELECT 1 AS hit FROM newsletter_subscribers WHERE lower(email) = lower(?) LIMIT 1')
+      .get(email)
+    return !!row
+  } catch {
+    return false
+  }
+}
+
 export async function getUserById(db: Db, userId: string): Promise<UserRecord | null> {
   const row = (await db.prepare('SELECT * FROM users WHERE id = ?').get(userId)) as any
   return row ? mapUser(row) : null
