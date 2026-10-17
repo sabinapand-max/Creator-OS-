@@ -51,7 +51,7 @@ export function Sidebar() {
         {!sidebarCollapsed && (
           <div className="flex flex-col">
             <span className="text-sm font-semibold text-sidebar-foreground">Indigos</span>
-            <span className="text-xs text-muted-foreground">Cognitive OS</span>
+            <span className="text-xs text-muted-foreground">Creative OS for ND</span>
           </div>
         )}
       </div>
