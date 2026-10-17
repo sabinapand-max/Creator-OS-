@@ -21,6 +21,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { getDb } from '@/lib/pilot/db/client.ts'
 import * as repo from '@/lib/pilot/db/repo.ts'
 import { sendTelegram } from '@/lib/pilot/telegram/send.ts'
+import { dailyCognitiveBriefing } from '@/lib/pilot/cognitive/index.ts'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -48,6 +49,25 @@ function pulseText(): string {
     'Or say "where was I?" and I\'ll pick up our last thread.',
     'And if today is just a blank, that\'s fine too — this is a door, not a task.',
   ].join('\n')
+}
+
+/**
+ * The pulse body, made per-user by the ND cognitive engine (Slice 2). A person with
+ * recorded state gets ONE gentle line — today's capacity or a trend worth naming — plus
+ * a micro-step sized to them. A new or quiet person gets the plain open-door check-in.
+ * Fully rule-based and local; it never calls the model, and a cognitive hiccup just
+ * falls back to the generic text rather than dropping the message.
+ */
+async function buildPulse(db: ReturnType<typeof getDb>, userId: string): Promise<string> {
+  const cog = await dailyCognitiveBriefing(db, userId).catch(() => null)
+  if (!cog) return pulseText()
+
+  const lines: string[] = ['Morning. No agenda, no streak to keep.']
+  lines.push('', cog.patternNote ?? cog.capacityNote)
+  lines.push('', `One small step, only if you want it: ${cog.microStep}`)
+  lines.push('', 'Brain-dump here and I will hold it, or say "where was I?" to pick up the thread.')
+  lines.push('And if today is just a blank, that is fine too — this is a door, not a task.')
+  return lines.join('\n')
 }
 
 async function alreadyPulsedRecently(
@@ -83,7 +103,7 @@ export async function GET(request: Request) {
       continue
     }
     // sendTelegram never throws; undeliverable chats are logged, not fatal.
-    await sendTelegram(link.telegramChatId, pulseText())
+    await sendTelegram(link.telegramChatId, await buildPulse(db, link.userId))
     await repo.audit(db, { userId: link.userId, action: PULSE_ACTION, detail: link.telegramChatId })
     sent++
   }

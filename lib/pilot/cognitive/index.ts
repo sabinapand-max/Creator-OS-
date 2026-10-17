@@ -27,6 +27,7 @@ import {
   STATES,
   transition,
 } from './stateMachine.ts'
+import { patternLine } from './patterns.ts'
 
 /* --------------------------------------------------------------- detection */
 
@@ -189,4 +190,32 @@ export async function advanceAndPersist(
 export async function describeCurrent(db: Db, userId: string): Promise<CognitiveSnapshot | null> {
   const state = await repo.getCognitiveState(db, userId)
   return state ? toSnapshot(state) : null
+}
+
+/**
+ * What the daily pulse needs about a person: today's capacity, one sized micro-step, and
+ * at most one gentle pattern observation. Null when the person has no recorded state yet,
+ * so a brand-new user just gets the plain open-door check-in rather than an analysis.
+ * Rule-based and local — it never calls the model.
+ */
+export interface DailyBriefing {
+  label: string
+  capacityNote: string
+  microStep: string
+  patternNote: string | null
+}
+
+export async function dailyCognitiveBriefing(
+  db: Db,
+  userId: string
+): Promise<DailyBriefing | null> {
+  const state = await repo.getCognitiveState(db, userId)
+  if (!state) return null
+  const snap = toSnapshot(state)
+  return {
+    label: snap.label,
+    capacityNote: snap.capacityNote,
+    microStep: snap.microStep,
+    patternNote: patternLine(state.history, state.current, state.energy),
+  }
 }

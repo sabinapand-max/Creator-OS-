@@ -12,12 +12,14 @@ import assert from 'node:assert/strict'
 import {
   advanceAndPersist,
   advanceState,
+  dailyCognitiveBriefing,
   describeCurrent,
   detectSignals,
 } from '../lib/pilot/cognitive/index.ts'
 import { createInitialState, STATES } from '../lib/pilot/cognitive/stateMachine.ts'
+import { detectPatterns, patternLine } from '../lib/pilot/cognitive/patterns.ts'
 import * as repo from '../lib/pilot/db/repo.ts'
-import type { CognitiveState } from '../lib/pilot/types.ts'
+import type { CognitiveHistoryEntry, CognitiveState } from '../lib/pilot/types.ts'
 import { makeUser, tempStore } from './helpers.ts'
 
 /* ---------------------------------------------------------------- detection */
@@ -143,6 +145,66 @@ test('advanceAndPersist + describeCurrent expose a sized capacity snapshot', asy
 
     const again = await describeCurrent(db, user.id)
     assert.equal(again!.current, STATES.OVERWHELMED)
+  } finally {
+    dispose()
+  }
+})
+
+/* ------------------------------------------------------- Slice 2: patterns & pulse */
+
+function entry(to: CognitiveState['current'], energy: CognitiveState['energy'] = 'medium'): CognitiveHistoryEntry {
+  return { from: STATES.DORMANT, to, timestamp: '2026-01-01T00:00:00.000Z', energy, sensory: 'calm' }
+}
+
+test('detectPatterns flags high burnout risk on a depleted-heavy history', () => {
+  const history = Array.from({ length: 10 }, () => entry(STATES.OVERWHELMED, 'depleted'))
+  assert.equal(detectPatterns(history).burnoutRisk, 'high')
+})
+
+test('patternLine gives permission (not analysis) when overwhelmed', () => {
+  const line = patternLine([entry(STATES.OVERWHELMED)], STATES.OVERWHELMED, 'medium')
+  assert.ok(line && /gentle/i.test(line))
+})
+
+test('patternLine stays silent for a benign, low-signal history', () => {
+  // One focused entry, no loop, no scatter dominance, no flow-chain, low burnout → null.
+  assert.equal(patternLine([entry(STATES.FOCUSED)], STATES.FOCUSED, 'medium'), null)
+})
+
+test('patternLine names a overwhelm→scatter cycle when it recurs', () => {
+  const history = [
+    entry(STATES.OVERWHELMED),
+    entry(STATES.SCATTERED),
+    entry(STATES.OVERWHELMED), // 3-window triggers the loop detector
+  ]
+  const line = patternLine(history, STATES.SCATTERED, 'medium')
+  assert.ok(line && /loop|scatter/i.test(line))
+})
+
+test('dailyCognitiveBriefing is null for a user with no recorded state', async () => {
+  const { db, dispose } = tempStore()
+  try {
+    const user = await makeUser(db, 'nopulse@example.com')
+    assert.equal(await dailyCognitiveBriefing(db, user.id), null)
+  } finally {
+    dispose()
+  }
+})
+
+test('dailyCognitiveBriefing pairs today\'s capacity with a gentle pattern note', async () => {
+  const { db, dispose } = tempStore()
+  try {
+    const user = await makeUser(db, 'pulse@example.com')
+    const snap = await advanceAndPersist(db, user.id, 'I am overwhelmed and running on empty')
+    assert.equal(snap!.current, STATES.OVERWHELMED)
+
+    const brief = await dailyCognitiveBriefing(db, user.id)
+    assert.ok(brief)
+    assert.equal(brief!.label, 'Overwhelmed')
+    assert.ok(brief!.capacityNote.length > 0)
+    assert.ok(brief!.microStep.length > 0)
+    // A single depleted+overwhelm entry already crosses the care-first threshold.
+    assert.ok(brief!.patternNote && /gentle/i.test(brief!.patternNote))
   } finally {
     dispose()
   }
