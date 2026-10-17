@@ -272,3 +272,15 @@ export interface CognitiveSnapshot {
   /** The one next step, sized to that capacity. */
   microStep: string
 }
+
+/**
+ * The full read for the Mind screen: today's snapshot plus the movement that produced it.
+ * `history` is the bounded transition list the state machine persists; `patternNote` is at
+ * most one gentle, strengths-first observation; `burnoutRisk` lets the UI soften its tone
+ * when someone has been running on empty. All still rule-based and local.
+ */
+export interface CognitiveMap extends CognitiveSnapshot {
+  history: CognitiveHistoryEntry[]
+  patternNote: string | null
+  burnoutRisk: 'low' | 'medium' | 'high'
+}

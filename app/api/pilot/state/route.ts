@@ -10,7 +10,7 @@ import { getDb } from '@/lib/pilot/db/client.ts'
 import * as repo from '@/lib/pilot/db/repo.ts'
 import { describeReadiness, readModelConfig } from '@/lib/pilot/model/index.ts'
 import { optionalUser } from '@/lib/pilot/web/session.ts'
-import { describeCurrent } from '@/lib/pilot/cognitive/index.ts'
+import { describeMap } from '@/lib/pilot/cognitive/index.ts'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -50,8 +50,20 @@ export async function GET(request: Request) {
     createdAt: r.createdAt,
   }))
 
-  // Today's capacity from the ND cognitive engine (null until the first turn).
-  const cognitive = await describeCurrent(db, userId).catch(() => null)
+  // Today's capacity + the map that produced it, from the ND cognitive engine.
+  // One rule-based read (null until the first turn). `cognitive` is the dashboard's
+  // lightweight snapshot; `cognitiveMap` is the full read the Mind screen renders.
+  const cognitiveMap = await describeMap(db, userId).catch(() => null)
+  const cognitive = cognitiveMap
+    ? {
+        current: cognitiveMap.current,
+        energy: cognitiveMap.energy,
+        sensory: cognitiveMap.sensory,
+        label: cognitiveMap.label,
+        capacityNote: cognitiveMap.capacityNote,
+        microStep: cognitiveMap.microStep,
+      }
+    : null
 
   return NextResponse.json({
     signedIn: true,
@@ -66,6 +78,7 @@ export async function GET(request: Request) {
     facts,
     recentModelRuns,
     cognitive,
+    cognitiveMap,
   })
 }
 

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-export type ActiveTab = 'dashboard' | 'brain-dump' | 'marketplace' | 'social' | 'memory' | 'settings'
+export type ActiveTab = 'dashboard' | 'mind' | 'brain-dump' | 'marketplace' | 'social' | 'memory' | 'settings'
 export type MarketplaceTab = 'etsy' | 'gumroad' | 'fiverr'
 
 interface ProviderSettings {

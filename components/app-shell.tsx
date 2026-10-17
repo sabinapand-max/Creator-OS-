@@ -14,6 +14,7 @@ import { AlertCircle, Loader2 } from 'lucide-react'
 import { usePilotStore, useUIStore } from '@/lib/stores'
 import { Sidebar } from './sidebar'
 import { Dashboard } from './screens/dashboard'
+import { MindMap } from './screens/mind'
 import { BrainDumpWorkspace } from './screens/brain-dump-workspace'
 import { CreatorMemory } from './screens/creator-memory'
 import { MarketplaceGenerator } from './screens/marketplace-generator'
@@ -66,6 +67,8 @@ export function AppShell() {
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard />
+      case 'mind':
+        return <MindMap />
       case 'brain-dump':
         return <BrainDumpWorkspace />
       case 'memory':

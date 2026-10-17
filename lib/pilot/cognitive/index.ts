@@ -13,6 +13,7 @@ import type { Db } from '../db/client.ts'
 import * as repo from '../db/repo.ts'
 import type {
   CognitiveEnergy,
+  CognitiveMap,
   CognitiveSensory,
   CognitiveSnapshot,
   CognitiveState,
@@ -27,7 +28,7 @@ import {
   STATES,
   transition,
 } from './stateMachine.ts'
-import { patternLine } from './patterns.ts'
+import { detectPatterns, patternLine } from './patterns.ts'
 
 /* --------------------------------------------------------------- detection */
 
@@ -190,6 +191,25 @@ export async function advanceAndPersist(
 export async function describeCurrent(db: Db, userId: string): Promise<CognitiveSnapshot | null> {
   const state = await repo.getCognitiveState(db, userId)
   return state ? toSnapshot(state) : null
+}
+
+/**
+ * The full read for the Mind screen: today's snapshot plus the transitions that produced
+ * it, one gentle pattern observation, and a burnout-risk hint for tone. One database read;
+ * null when nothing is recorded yet, so the screen shows its open-door empty state instead
+ * of an analysis of nobody.
+ */
+export async function describeMap(db: Db, userId: string): Promise<CognitiveMap | null> {
+  const state = await repo.getCognitiveState(db, userId)
+  if (!state) return null
+  const snap = toSnapshot(state)
+  const report = detectPatterns(state.history)
+  return {
+    ...snap,
+    history: state.history,
+    patternNote: patternLine(state.history, state.current, state.energy),
+    burnoutRisk: report.burnoutRisk,
+  }
 }
 
 /**

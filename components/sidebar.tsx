@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
   Brain,
+  Compass,
   User,
   ShoppingBag,
   Share2,
@@ -21,6 +22,7 @@ import { Button } from '@/components/ui/button'
 
 const navItems: { id: ActiveTab; label: string; icon: React.ElementType }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'mind', label: 'Mind', icon: Compass },
   { id: 'brain-dump', label: 'Brain Dump', icon: Brain },
   { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag },
   { id: 'social', label: 'Social Studio', icon: Share2 },

@@ -14,6 +14,7 @@ import {
   advanceState,
   dailyCognitiveBriefing,
   describeCurrent,
+  describeMap,
   detectSignals,
 } from '../lib/pilot/cognitive/index.ts'
 import { createInitialState, STATES } from '../lib/pilot/cognitive/stateMachine.ts'
@@ -205,6 +206,41 @@ test('dailyCognitiveBriefing pairs today\'s capacity with a gentle pattern note'
     assert.ok(brief!.microStep.length > 0)
     // A single depleted+overwhelm entry already crosses the care-first threshold.
     assert.ok(brief!.patternNote && /gentle/i.test(brief!.patternNote))
+  } finally {
+    dispose()
+  }
+})
+
+/* ------------------------------------------------------------- Slice 3: the Mind map */
+
+test('describeMap is null for a user with nothing recorded (open-door empty state)', async () => {
+  const { db, dispose } = tempStore()
+  try {
+    const user = await makeUser(db, 'nomind@example.com')
+    assert.equal(await describeMap(db, user.id), null)
+  } finally {
+    dispose()
+  }
+})
+
+test('describeMap returns a superset of the snapshot plus history, pattern note and risk', async () => {
+  const { db, dispose } = tempStore()
+  try {
+    const user = await makeUser(db, 'mind@example.com')
+    await advanceAndPersist(db, user.id, 'I am overwhelmed and running on empty')
+
+    const map = await describeMap(db, user.id)
+    assert.ok(map)
+    // Snapshot fields are all present, so the dashboard could read it unchanged.
+    assert.equal(map!.current, STATES.OVERWHELMED)
+    assert.equal(map!.label, 'Overwhelmed')
+    assert.ok(map!.capacityNote.length > 0)
+    assert.ok(map!.microStep.length > 0)
+    // The Mind-only additions.
+    assert.ok(Array.isArray(map!.history))
+    assert.equal(map!.history.length, 1)
+    assert.ok(map!.patternNote && /gentle/i.test(map!.patternNote))
+    assert.ok(['low', 'medium', 'high'].includes(map!.burnoutRisk))
   } finally {
     dispose()
   }

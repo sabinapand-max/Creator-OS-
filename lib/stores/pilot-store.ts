@@ -12,6 +12,7 @@
  */
 import { create } from 'zustand'
 import type {
+  CognitiveMap,
   CognitiveSnapshot,
   Conversation,
   Fact,
@@ -109,6 +110,8 @@ interface PilotStore {
   recentModelRuns: ModelRunSummary[]
   /** Today's capacity from the ND cognitive engine; null until the first turn. */
   cognitive: CognitiveSnapshot | null
+  /** The full Mind-screen read (capacity + transitions + one pattern note); null until a turn. */
+  cognitiveMap: CognitiveMap | null
 
   /** True while a turn is in flight, so the UI can disable the button. */
   submitting: boolean
@@ -142,6 +145,7 @@ const EMPTY = {
   facts: [] as Fact[],
   recentModelRuns: [] as ModelRunSummary[],
   cognitive: null as CognitiveSnapshot | null,
+  cognitiveMap: null as CognitiveMap | null,
 }
 
 async function postJson(url: string, body: unknown): Promise<{ status: number; data: any }> {
@@ -209,6 +213,7 @@ export const usePilotStore = create<PilotStore>()((set, get) => ({
         facts: data.facts ?? [],
         recentModelRuns: data.recentModelRuns ?? [],
         cognitive: data.cognitive ?? null,
+        cognitiveMap: data.cognitiveMap ?? null,
       })
     } catch (err) {
       // The server is unreachable. Say so instead of showing an empty app that
