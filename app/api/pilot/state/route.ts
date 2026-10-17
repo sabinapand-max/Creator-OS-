@@ -10,6 +10,7 @@ import { getDb } from '@/lib/pilot/db/client.ts'
 import * as repo from '@/lib/pilot/db/repo.ts'
 import { describeReadiness, readModelConfig } from '@/lib/pilot/model/index.ts'
 import { optionalUser } from '@/lib/pilot/web/session.ts'
+import { describeCurrent } from '@/lib/pilot/cognitive/index.ts'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -49,6 +50,9 @@ export async function GET(request: Request) {
     createdAt: r.createdAt,
   }))
 
+  // Today's capacity from the ND cognitive engine (null until the first turn).
+  const cognitive = await describeCurrent(db, userId).catch(() => null)
+
   return NextResponse.json({
     signedIn: true,
     user: user ? { id: user.id, email: user.email, displayName: user.displayName } : null,
@@ -61,6 +65,7 @@ export async function GET(request: Request) {
     openActions,
     facts,
     recentModelRuns,
+    cognitive,
   })
 }
 

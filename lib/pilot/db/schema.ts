@@ -267,4 +267,21 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, created_at DESC);
+
+-- ND cognitive engine state, one row per user. Rule-based capacity tracking
+-- (flow / overwhelmed / hyperfocus ...) that sizes the one next action to today.
+-- current/energy/sensory are the live values; history_json holds the last ~100
+-- transitions for the pattern engine. Isolated per user via the user_id primary key.
+--
+-- SCHEMA_VERSION stays at 1: this table is additive and every statement in
+-- SCHEMA_SQL is IF NOT EXISTS, so existing pilot databases pick it up on the
+-- next open.
+CREATE TABLE IF NOT EXISTS cognitive_state (
+  user_id      TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  current      TEXT NOT NULL,
+  energy       TEXT NOT NULL,
+  sensory      TEXT NOT NULL,
+  history_json TEXT NOT NULL DEFAULT '[]',
+  updated_at   TEXT NOT NULL
+);
 `

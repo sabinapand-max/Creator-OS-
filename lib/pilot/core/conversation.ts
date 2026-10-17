@@ -22,6 +22,7 @@ import type { Db } from '../db/client.ts'
 import * as repo from '../db/repo.ts'
 import { callModel, parseTurnResponse, readModelConfig, type ModelConfig } from '../model/index.ts'
 import type {
+  CognitiveSnapshot,
   Conversation,
   ConversationChannel,
   Message,
@@ -40,6 +41,7 @@ import {
   type Directive,
 } from './directives.ts'
 import { recordObservedFacts } from './memory.ts'
+import { advanceAndPersist } from '../cognitive/index.ts'
 import { buildTurnMessages, composeAssistantText } from './prompts.ts'
 
 export const MAX_TURN_CHARS = 20_000
@@ -77,6 +79,8 @@ export interface TurnSuccess {
   assistantMessage: Message
   turn: TurnResult
   nextAction: NextAction | null
+  /** Today's capacity from the ND cognitive engine. Null on a replayed run. */
+  cognitive?: CognitiveSnapshot | null
   provider: string
   model: string
   latencyMs: number
@@ -255,7 +259,18 @@ export async function submitTurn(db: Db, input: SubmitTurnInput): Promise<Submit
     runId: run.id,
     deduplicated: false,
   })
-  return persisted
+
+  // ND cognitive layer: read today's capacity from this brain-dump's signals, persist it,
+  // and return it so the UI can size the one next action. Guarded — a store hiccup must
+  // never break an otherwise-successful, already-persisted turn.
+  let cognitive: CognitiveSnapshot | null = null
+  try {
+    cognitive = await advanceAndPersist(db, userId, text)
+  } catch {
+    cognitive = null
+  }
+
+  return { ...persisted, cognitive }
 }
 
 /* ------------------------------------------------------------ persistence */

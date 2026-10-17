@@ -18,6 +18,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Db } from './client.ts'
 import type {
+  CognitiveState,
   ContentDraft,
   Conversation,
   ConversationChannel,
@@ -1313,4 +1314,65 @@ export async function audit(
       'INSERT INTO audit_log (id, user_id, action, detail, created_at) VALUES (?, ?, ?, ?, ?)'
     )
     .run(randomUUID(), input.userId ?? null, input.action, input.detail ?? null, nowIso())
+}
+
+/* -------------------------------------------------------------- cognitive */
+
+/**
+ * Read the user's cognitive state, or null when none is recorded yet. The transition
+ * history is stored as JSON; a corrupt or absent blob degrades to an empty history
+ * rather than throwing, so a bad row can never break a brain-dump turn.
+ */
+export async function getCognitiveState(
+  db: Db,
+  userId: string
+): Promise<CognitiveState | null> {
+  const row = await db
+    .prepare('SELECT current, energy, sensory, history_json FROM cognitive_state WHERE user_id = ?')
+    .get(userId)
+  if (!row) return null
+  let history: CognitiveState['history'] = []
+  try {
+    history = JSON.parse(row.history_json || '[]')
+  } catch {
+    history = []
+  }
+  return {
+    current: row.current,
+    energy: row.energy,
+    sensory: row.sensory,
+    lastTransition: null,
+    history,
+  }
+}
+
+/**
+ * Insert or replace the user's cognitive state. Upserts on the user_id primary key so
+ * there is exactly one row per user. History is capped to the last 100 entries here as
+ * well, keeping the stored blob bounded regardless of what the caller passes.
+ */
+export async function upsertCognitiveState(
+  db: Db,
+  userId: string,
+  state: CognitiveState
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO cognitive_state (user_id, current, energy, sensory, history_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         current = excluded.current,
+         energy = excluded.energy,
+         sensory = excluded.sensory,
+         history_json = excluded.history_json,
+         updated_at = excluded.updated_at`
+    )
+    .run(
+      userId,
+      state.current,
+      state.energy,
+      state.sensory,
+      JSON.stringify(state.history.slice(-100)),
+      nowIso()
+    )
 }

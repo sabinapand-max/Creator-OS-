@@ -89,6 +89,7 @@ export async function POST(request: Request) {
     projectId: result.projectId,
     turn: result.turn,
     nextAction: result.nextAction,
+    cognitive: result.cognitive ?? null,
     assistantMessageId: result.assistantMessage.id,
     provider: result.provider,
     model: result.model,

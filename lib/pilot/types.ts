@@ -222,3 +222,53 @@ export interface ContentDraft {
   createdAt: string
   deletedAt: string | null
 }
+
+/* ------------------------------------------------------- cognitive state */
+
+/**
+ * The ND cognitive engine, shared between the server module (lib/pilot/cognitive) and the
+ * client store. Pure types only, so nothing server-side leaks into the browser bundle.
+ * Rule-based and local — it never calls the model.
+ */
+export type CognitiveStateName =
+  | 'flow'
+  | 'focused'
+  | 'scattered'
+  | 'overwhelmed'
+  | 'recovering'
+  | 'dormant'
+  | 'hyperfocus'
+  | 'dissociated'
+
+export type CognitiveEnergy = 'high' | 'medium' | 'low' | 'depleted'
+export type CognitiveSensory = 'calm' | 'moderate' | 'elevated' | 'overload'
+
+export interface CognitiveHistoryEntry {
+  from: CognitiveStateName
+  to: CognitiveStateName
+  timestamp: string
+  energy: CognitiveEnergy
+  sensory: CognitiveSensory
+}
+
+/** The persisted, full engine state (what lives in the cognitive_state table). */
+export interface CognitiveState {
+  current: CognitiveStateName
+  energy: CognitiveEnergy
+  sensory: CognitiveSensory
+  lastTransition: string | null
+  history: CognitiveHistoryEntry[]
+}
+
+/** A ready-to-display, strengths-first capacity summary derived from the state. */
+export interface CognitiveSnapshot {
+  current: CognitiveStateName
+  energy: CognitiveEnergy
+  sensory: CognitiveSensory
+  /** Human label, e.g. "Overwhelmed". */
+  label: string
+  /** Information-not-failure framing of today's capacity. */
+  capacityNote: string
+  /** The one next step, sized to that capacity. */
+  microStep: string
+}

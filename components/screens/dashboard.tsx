@@ -53,6 +53,7 @@ export function Dashboard() {
   const openActions = usePilotStore((s) => s.openActions)
   const facts = usePilotStore((s) => s.facts)
   const recentModelRuns = usePilotStore((s) => s.recentModelRuns)
+  const cognitive = usePilotStore((s) => s.cognitive)
 
   const started = projects.length > 0
   const lastActivity = lastActivityAt(conversations)
@@ -73,6 +74,19 @@ export function Dashboard() {
               : 'Nothing is stored yet. Your first brain dump creates a project and a conversation that survive a refresh.'}
           </p>
         </header>
+
+        {/* Today's capacity, from the ND cognitive engine (rule-based, no AI). */}
+        {cognitive && (
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="space-y-1 p-5">
+              <p className="text-sm font-semibold text-foreground">{cognitive.label} today</p>
+              <p className="text-sm text-muted-foreground">{cognitive.capacityNote}</p>
+              <p className="text-sm text-foreground">
+                <span className="font-medium">Sized for today:</span> {cognitive.microStep}
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Counts, all read back from SQLite through /api/pilot/state. */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
