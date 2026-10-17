@@ -246,7 +246,7 @@ export function BrainDumpWorkspace() {
               <CardDescription>
                 {continuing
                   ? 'This conversation is open. Typing here continues it — the assistant still has the earlier context.'
-                  : 'Type your thoughts, concepts, or rough ideas. Be messy — that\u2019s the point. This starts a new project.'}
+                  : 'Type your thoughts, concepts, or rough ideas. You can afford to be messy \u2014 that\u2019s what starts a new project.'}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
