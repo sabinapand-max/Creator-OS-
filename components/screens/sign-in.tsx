@@ -53,7 +53,7 @@ export function SignInScreen() {
       <div className="w-full max-w-md space-y-4">
         <Card className="bg-card border-border">
           <CardHeader>
-            <CardTitle className="text-xl">Creator OS — private pilot</CardTitle>
+            <CardTitle className="text-xl">Indigos — private pilot</CardTitle>
             <CardDescription>
               Three-person pilot. Your brain dumps, remembered facts and next actions are stored
               server-side against your account, so the same conversation can continue later and on

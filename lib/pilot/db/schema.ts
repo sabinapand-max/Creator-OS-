@@ -1,7 +1,7 @@
 /**
  * Pilot database schema.
  *
- * Durable, server-side state shared by the Creator OS web UI, the MCP server
+ * Durable, server-side state shared by the Indigos web UI, the MCP server
  * and the Telegram handler. Browser localStorage cannot support Telegram
  * continuity, so every record below lives here.
  *

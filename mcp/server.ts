@@ -1,5 +1,5 @@
 /**
- * Creator OS MCP server (stdio transport).
+ * Indigos MCP server (stdio transport).
  *
  * Exposes exactly the five tools the pilot brief names, and nothing else:
  *   capture_brain_dump, get_project_context, append_conversation_message,
@@ -142,7 +142,7 @@ async function start(userId: string, who: string): Promise<void> {
     { capabilities: { tools: {} } }
   )
 
-  process.stderr.write(`Creator OS MCP server ready for ${who}. Five tools, acting as that account only.\n`)
+  process.stderr.write(`Indigos MCP server ready for ${who}. Five tools, acting as that account only.\n`)
 
   server.registerTool(
     'capture_brain_dump',

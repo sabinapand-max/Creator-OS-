@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Creator OS prepared for a private three-person pilot: real brain-dump conversation, durable shared state, authenticated MCP server, and secure Telegram linking.",
+  "description": "Indigos prepared for a private three-person pilot: real brain-dump conversation, durable shared state, authenticated MCP server, and secure Telegram linking.",
   "scripts": {
     "dev": "next dev -p 3100",
     "build": "next build",

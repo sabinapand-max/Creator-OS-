@@ -62,7 +62,7 @@ async function getOrCreateTelegramUser(
   }
 
   // Private-pilot bootstrap mode: each Telegram chat gets its own isolated
-  // Creator OS account. The generated password is never returned or logged.
+  // Indigos account. The generated password is never returned or logged.
   const email = `telegram-${chatId.replace(/[^0-9-]/g, '')}@telegram.local`
   const created = await registerAccount(db, {
     email,
@@ -111,7 +111,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
         })
         await sendTelegram(
           chatId,
-          'Connected. 🦊 Your Creator OS doorway is live here now. Paste a brain dump whenever you are ready.'
+          'Connected. 🦊 Your Indigos doorway is live here now. Paste a brain dump whenever you are ready.'
         )
         return
       }
@@ -123,7 +123,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
       if (!(await repo.getActiveLinkByChatId(db, chatId))) {
         await sendTelegram(
           chatId,
-          'That link code is no longer valid — it was used, has expired, or was mistyped. Ask Creator OS for a fresh code, then send /start followed by the new one.'
+          'That link code is no longer valid — it was used, has expired, or was mistyped. Ask Indigos for a fresh code, then send /start followed by the new one.'
         )
         return
       }
@@ -140,7 +140,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
       if (error instanceof Error && error.message === 'telegram_not_linked') {
         await sendTelegram(
           chatId,
-          'Creator OS is invite-only right now. Open your Creator OS dashboard, ask for a Telegram link code, then send /start followed by that code.'
+          'Indigos is invite-only right now. Open your Indigos dashboard, ask for a Telegram link code, then send /start followed by that code.'
         )
         return
       }
@@ -159,7 +159,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
 
     await sendTelegram(
       chatId,
-      'Creator OS is connected. 🦊\n\nPaste what is on your mind. I will turn it into a short interpretation and one next action.\n\nTry “where was I?” or “save for later” at any point.'
+      'Indigos is connected. 🦊\n\nPaste what is on your mind. I will turn it into a short interpretation and one next action.\n\nTry “where was I?” or “save for later” at any point.'
     )
     return
   }
@@ -168,13 +168,13 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
   if (!link) {
     await sendTelegram(
       chatId,
-      'This Telegram chat is not connected to Creator OS yet. Send /start first.'
+      'This Telegram chat is not connected to Indigos yet. Send /start first.'
     )
     return
   }
 
   if (message.chat.type && message.chat.type !== 'private') {
-    await sendTelegram(chatId, 'For the private pilot, Creator OS only responds in a one-to-one Telegram chat.')
+    await sendTelegram(chatId, 'For the private pilot, Indigos only responds in a one-to-one Telegram chat.')
     return
   }
 

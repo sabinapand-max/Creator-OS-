@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Creator Expansion OS',
-  description: 'AI-native creator operating system. Transform messy ideas into monetizable products.',
+  title: 'Indigos — Cognitive OS',
+  description: 'A cognitive operating system for neurodivergent creators. From a messy brain dump to one doable next step, sized to how you are actually running. Meaning before productivity.',
   generator: 'v0.app',
   icons: {
     icon: [

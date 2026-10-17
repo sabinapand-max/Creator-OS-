@@ -1,5 +1,5 @@
 /**
- * Daily pulse cron — the one scheduled job the Creator OS design always
+ * Daily pulse cron — the one scheduled job the Indigos design always
  * imagined (`PILOT_TELEGRAM_DAILY_*`) but never shipped.
  *
  * Vercel Cron makes an authenticated GET to this path once per day. For each

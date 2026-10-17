@@ -2,7 +2,7 @@
  * stateMachine.ts
  *
  * TypeScript port of the ND cognitive engine's state machine (src/logic/stateMachine.js),
- * brought into the live Creator OS pilot so the "one next action" can finally be sized
+ * brought into the live Indigos pilot so the "one next action" can finally be sized
  * to today's capacity. Rule-based and local, exactly like the original: NO network, NO AI,
  * so it costs nothing and can run on every brain-dump turn and every daily pulse.
  *

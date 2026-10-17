@@ -106,7 +106,7 @@ export default function TelegramLinkPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col justify-center gap-6 p-6">
       <header className="space-y-1">
-        <p className="text-xs tracking-[0.3em] text-emerald-300 uppercase">Creator OS · private pilot</p>
+        <p className="text-xs tracking-[0.3em] text-emerald-300 uppercase">Indigos · private pilot</p>
         <h1 className="text-2xl font-semibold text-white">Telegram doorway</h1>
         <p className="text-sm text-slate-400">
           Pair one Telegram chat with your account. Hermes replies only in the chat you link here.
@@ -188,7 +188,7 @@ export default function TelegramLinkPage() {
               <p className="text-sm text-slate-300">
                 Open Telegram and message{' '}
                 <span className="font-medium text-white">
-                  {issued.botUsername ? `@${issued.botUsername}` : 'the Creator OS bot'}
+                  {issued.botUsername ? `@${issued.botUsername}` : 'the Indigos bot'}
                 </span>{' '}
                 with:
               </p>

@@ -25,7 +25,7 @@ async function sendMessage(chatId: number, text: string) {
 
 // Main polling loop
 (async () => {
-  console.log('🚀 Creator OS Telegram worker starting...');
+  console.log('🚀 Indigos Telegram worker starting...');
   try {
     // Get bot info to show username
     const meResp = await fetch(`${apiUrl}/getMe`);
@@ -52,7 +52,7 @@ async function sendMessage(chatId: number, text: string) {
         const message = update.message;
         if (!message) continue;
         if (message.text && message.text.startsWith('/start')) {
-          await sendMessage(message.chat.id, 'I am the Creator OS Telegram doorway.\n\nTo connect me to your workspace:\n1️⃣ Open Creator OS → Settings → Telegram → Connect Telegram.\n2️⃣ Generate a connection link.\n3️⃣ Open that link in Telegram to finish the set‑up.');
+          await sendMessage(message.chat.id, 'I am the Indigos Telegram doorway.\n\nTo connect me to your workspace:\n1️⃣ Open Indigos → Settings → Telegram → Connect Telegram.\n2️⃣ Generate a connection link.\n3️⃣ Open that link in Telegram to finish the set‑up.');
         }
         // Optionally handle other messages here
       }

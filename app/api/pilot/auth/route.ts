@@ -30,7 +30,7 @@ const ERROR_TEXT: Record<string, string> = {
 }
 
 const WAITLIST_HINT =
-  'Creator OS is invite-only right now. Join the waitlist at creatoros.indigos.uk and we\u2019ll email you a link the moment a spot opens.'
+  'Indigos is invite-only right now. Join the waitlist at creatoros.indigos.uk and we\u2019ll email you a link the moment a spot opens.'
 
 /**
  * True when this email may create an account. Only enforced while

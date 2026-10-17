@@ -2,11 +2,11 @@
  * Authentication primitives for the pilot.
  *
  * Three independent credential types, all resolved server-side:
- *  1. Web session  - proves who is using the Creator OS UI.
+ *  1. Web session  - proves who is using the Indigos UI.
  *  2. MCP token    - per-user bearer token; the MCP server derives the acting
  *                    user from this and nothing else.
  *  3. Link code    - short-lived, single-use code that binds an authenticated
- *                    Creator OS account to a Telegram chat.
+ *                    Indigos account to a Telegram chat.
  *
  * Passwords are hashed with scrypt. Secrets are never logged and never returned
  * to a client after initial issue.

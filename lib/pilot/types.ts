@@ -1,5 +1,5 @@
 /**
- * Shared domain types for the Creator OS pilot.
+ * Shared domain types for the Indigos pilot.
  *
  * These types are the contract between the three surfaces that must behave
  * identically: the web UI (Next.js route handlers), the MCP tools consumed by

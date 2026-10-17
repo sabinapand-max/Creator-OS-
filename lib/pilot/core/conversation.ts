@@ -502,7 +502,7 @@ export function deriveProjectTitle(text: string): string {
 /* -------------------------------------------------------------- directives */
 
 const UNLINK_REPLY =
-  'Telegram linking is managed from your Creator OS account. Open Settings → Telegram there to connect or disconnect.'
+  'Telegram linking is managed from your Indigos account. Open Settings → Telegram there to connect or disconnect.'
 
 async function handleDirective(
   db: Db,
@@ -588,7 +588,7 @@ async function handleDirective(
     }
     case 'help': {
       reply = [
-        'Creator OS pilot — what you can do here:',
+        'Indigos pilot — what you can do here:',
         '• Paste a brain dump. You get a short interpretation, at most one question, and one next action.',
         '• Reply to keep the same conversation going.',
         '• "save for later" parks this conversation.',

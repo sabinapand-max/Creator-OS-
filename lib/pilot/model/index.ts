@@ -352,7 +352,7 @@ async function postChatCompletion(
     if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`
     if (config.provider === 'openrouter') {
       headers['HTTP-Referer'] = process.env.PILOT_APP_URL || 'http://localhost:3100'
-      headers['X-Title'] = 'Creator OS Pilot'
+      headers['X-Title'] = 'Indigos Pilot'
     }
 
     const body: Record<string, unknown> = {

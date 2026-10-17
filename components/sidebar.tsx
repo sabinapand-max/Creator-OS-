@@ -50,8 +50,8 @@ export function Sidebar() {
         </div>
         {!sidebarCollapsed && (
           <div className="flex flex-col">
-            <span className="text-sm font-semibold text-sidebar-foreground">Creator OS</span>
-            <span className="text-xs text-muted-foreground">Expansion Engine</span>
+            <span className="text-sm font-semibold text-sidebar-foreground">Indigos</span>
+            <span className="text-xs text-muted-foreground">Cognitive OS</span>
           </div>
         )}
       </div>

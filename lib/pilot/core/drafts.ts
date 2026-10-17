@@ -66,7 +66,7 @@ export function draftTokenBudget(kind: DraftKind): number {
   return kind === 'offer' ? 2600 : 1400
 }
 
-export const DRAFT_SYSTEM_PROMPT_HEADER = `You are the content draft writer inside Creator OS, a private pilot for three people.
+export const DRAFT_SYSTEM_PROMPT_HEADER = `You are the content draft writer inside Indigos, a private pilot for three people.
 
 You write drafts the person will read, edit and copy out by hand. You never publish, post, schedule or send anything, and you never claim to.
 
