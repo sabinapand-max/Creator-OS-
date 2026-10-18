@@ -33,6 +33,7 @@ import type {
   NextAction,
   NextActionStatus,
   Project,
+  SparkResult,
   TelegramLink,
   User,
 } from '../types.ts'
@@ -1375,4 +1376,51 @@ export async function upsertCognitiveState(
       JSON.stringify(state.history.slice(-100)),
       nowIso()
     )
+}
+
+/* ---------------------------------------------------------------- spark */
+
+/**
+ * Read the stored SPARK result, or null when the assessment has never been
+ * taken. A corrupt or structurally wrong blob degrades to null rather than
+ * throwing, so a bad row can never break state reads or a brain-dump turn.
+ */
+export async function getSparkResult(db: Db, userId: string): Promise<SparkResult | null> {
+  const row = await db
+    .prepare('SELECT result_json FROM spark_results WHERE user_id = ?')
+    .get(userId)
+  if (!row) return null
+  try {
+    const parsed = JSON.parse(row.result_json || 'null')
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      typeof parsed.sparkIndex !== 'number' ||
+      typeof parsed.profileType !== 'string' ||
+      !parsed.results ||
+      typeof parsed.results !== 'object'
+    ) {
+      return null
+    }
+    return parsed as SparkResult
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Insert or replace the user's SPARK result. Upserts on the user_id primary key,
+ * so there is exactly one profile per user (retaking overwrites, as in the
+ * original engine). Only the computed result is stored — never raw responses.
+ */
+export async function saveSparkResult(db: Db, userId: string, result: SparkResult): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO spark_results (user_id, result_json, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         result_json = excluded.result_json,
+         updated_at = excluded.updated_at`
+    )
+    .run(userId, JSON.stringify(result), nowIso())
 }

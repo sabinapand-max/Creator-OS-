@@ -284,3 +284,40 @@ export interface CognitiveMap extends CognitiveSnapshot {
   patternNote: string | null
   burnoutRisk: 'low' | 'medium' | 'high'
 }
+
+/* ---------------------------------------------------------------- SPARK */
+
+/** The five SPARK dimensions (port of the nd-cognitive-os assessment engine). */
+export type SparkDimension = 'CI' | 'ER' | 'SA' | 'CD' | 'ED'
+
+/** What the assessment stores: per-dimension averages on the 0-4 Likert scale,
+ * the 0-20 sparkIndex and the profile type label. Raw responses are never kept. */
+export interface SparkResult {
+  results: Record<SparkDimension, number>
+  sparkIndex: number
+  profileType: string
+}
+
+/** One dimension's strengths-first reading. `quiet` band entries are present for
+ * the full profile view but never framed as deficits in guidance or prompts. */
+export interface SparkDimensionReading {
+  key: SparkDimension
+  name: string
+  score: number
+  band: 'high' | 'present' | 'quiet'
+  strength: string
+  guidance: string
+}
+
+/** The translated, strengths-first profile the UI and the prompt context read. */
+export interface SparkProfile {
+  profileType: string
+  sparkIndex: number
+  dimensions: SparkDimensionReading[]
+  /** Active dimensions, strongest first. */
+  active: SparkDimensionReading[]
+  /** At most three strength sentences. */
+  topStrengths: string[]
+  /** One line for the turn prompt: profile type plus the two loudest dimensions. */
+  summary: string
+}

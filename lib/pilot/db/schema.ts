@@ -284,4 +284,15 @@ CREATE TABLE IF NOT EXISTS cognitive_state (
   history_json TEXT NOT NULL DEFAULT '[]',
   updated_at   TEXT NOT NULL
 );
+
+-- SPARK assessment outcome, one row per user. The rule-based strengths-first
+-- profile ported from the nd-cognitive-os engine: only the computed result is
+-- stored ({ results, sparkIndex, profileType } as JSON) — the 40 raw responses
+-- are scored in the request and never persisted. Additive, IF NOT EXISTS:
+-- SCHEMA_VERSION stays at 1.
+CREATE TABLE IF NOT EXISTS spark_results (
+  user_id     TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  result_json TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
 `

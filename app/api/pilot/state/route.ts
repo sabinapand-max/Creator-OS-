@@ -12,6 +12,7 @@ import { describeReadiness, readModelConfig } from '@/lib/pilot/model/index.ts'
 import { optionalUser } from '@/lib/pilot/web/session.ts'
 import { checkInAndPersist, describeMap } from '@/lib/pilot/cognitive/index.ts'
 import { ENERGY_LEVELS, SENSORY_LEVELS } from '@/lib/pilot/cognitive/stateMachine.ts'
+import { translateSparkProfile } from '@/lib/pilot/cognitive/spark.ts'
 import type { CognitiveEnergy, CognitiveMap, CognitiveSensory } from '@/lib/pilot/types.ts'
 
 export const runtime = 'nodejs'
@@ -58,6 +59,12 @@ export async function GET(request: Request) {
   const cognitiveMap = await describeMap(db, userId).catch(() => null)
   const cognitive = cognitiveMap ? snapshotSubset(cognitiveMap) : null
 
+  // The one-time SPARK profile, translated strengths-first. Null until taken.
+  const spark = await repo
+    .getSparkResult(db, userId)
+    .then((r) => translateSparkProfile(r))
+    .catch(() => null)
+
   return NextResponse.json({
     signedIn: true,
     user: user ? { id: user.id, email: user.email, displayName: user.displayName } : null,
@@ -72,6 +79,7 @@ export async function GET(request: Request) {
     recentModelRuns,
     cognitive,
     cognitiveMap,
+    spark,
   })
 }
 

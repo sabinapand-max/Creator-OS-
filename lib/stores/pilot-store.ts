@@ -22,6 +22,7 @@ import type {
   NextAction,
   Project,
   ReentryCard,
+  SparkProfile,
   TurnResult,
 } from '@/lib/pilot/types.ts'
 import { useBrainDumpStore } from './brain-dump-store'
@@ -114,6 +115,8 @@ interface PilotStore {
   cognitive: CognitiveSnapshot | null
   /** The full Mind-screen read (capacity + transitions + one pattern note); null until a turn. */
   cognitiveMap: CognitiveMap | null
+  /** The one-time SPARK strengths profile, translated strengths-first; null until taken. */
+  spark: SparkProfile | null
 
   /** True while a turn is in flight, so the UI can disable the button. */
   submitting: boolean
@@ -135,6 +138,8 @@ interface PilotStore {
   }) => Promise<TurnOutcome>
   /** Tap today's energy/sensory directly; updates the Mind map without a brain dump. */
   checkIn: (input: { energy?: CognitiveEnergy; sensory?: CognitiveSensory }) => Promise<void>
+  /** Submit the 40 SPARK answers; scored and stored server-side, rule-based. */
+  submitSpark: (responses: number[]) => Promise<{ ok: boolean; error?: string }>
   reset: () => void
 }
 
@@ -150,6 +155,7 @@ const EMPTY = {
   recentModelRuns: [] as ModelRunSummary[],
   cognitive: null as CognitiveSnapshot | null,
   cognitiveMap: null as CognitiveMap | null,
+  spark: null as SparkProfile | null,
 }
 
 async function postJson(url: string, body: unknown): Promise<{ status: number; data: any }> {
@@ -218,6 +224,7 @@ export const usePilotStore = create<PilotStore>()((set, get) => ({
         recentModelRuns: data.recentModelRuns ?? [],
         cognitive: data.cognitive ?? null,
         cognitiveMap: data.cognitiveMap ?? null,
+        spark: data.spark ?? null,
       })
     } catch (err) {
       // The server is unreachable. Say so instead of showing an empty app that
@@ -341,6 +348,16 @@ export const usePilotStore = create<PilotStore>()((set, get) => ({
       // The POST returns the refreshed map directly, so no full re-read is needed.
       set({ cognitive: data.cognitive ?? null, cognitiveMap: data.cognitiveMap ?? null })
     }
+  },
+
+  submitSpark: async (responses) => {
+    const { status, data } = await postJson('/api/pilot/spark', { responses })
+    if (!data?.signedIn) return { ok: false, error: 'Not signed in.' }
+    if (status !== 200 || !data.spark) {
+      return { ok: false, error: data?.error ?? 'Could not save the assessment.' }
+    }
+    set({ spark: data.spark })
+    return { ok: true }
   },
 
   reset: () => set({ ...EMPTY, status: 'loading', hydrated: false, loadError: null }),

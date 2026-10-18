@@ -15,6 +15,7 @@ import { usePilotStore, useUIStore } from '@/lib/stores'
 import { Sidebar } from './sidebar'
 import { Dashboard } from './screens/dashboard'
 import { MindMap } from './screens/mind'
+import { SparkScreen } from './screens/spark'
 import { BrainDumpWorkspace } from './screens/brain-dump-workspace'
 import { CreatorMemory } from './screens/creator-memory'
 import { MarketplaceGenerator } from './screens/marketplace-generator'
@@ -69,6 +70,8 @@ export function AppShell() {
         return <Dashboard />
       case 'mind':
         return <MindMap />
+      case 'spark':
+        return <SparkScreen />
       case 'brain-dump':
         return <BrainDumpWorkspace />
       case 'memory':

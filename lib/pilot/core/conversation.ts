@@ -42,6 +42,7 @@ import {
 } from './directives.ts'
 import { recordObservedFacts } from './memory.ts'
 import { advanceAndPersist, describeCurrent } from '../cognitive/index.ts'
+import { translateSparkProfile } from '../cognitive/spark.ts'
 import { buildTurnMessages, composeAssistantText } from './prompts.ts'
 
 export const MAX_TURN_CHARS = 20_000
@@ -177,6 +178,14 @@ export async function submitTurn(db: Db, input: SubmitTurnInput): Promise<Submit
     if (now) ctx.cognitiveNote = `${now.label}, ${now.energy} energy`
   } catch {
     ctx.cognitiveNote = null
+  }
+  // And who they are, strengths-first, if they have taken the one-time SPARK
+  // assessment. Same rule: read-only, free, never breaks a turn.
+  try {
+    const spark = translateSparkProfile(await repo.getSparkResult(db, userId))
+    if (spark) ctx.sparkNote = spark.summary
+  } catch {
+    ctx.sparkNote = null
   }
   const messages = buildTurnMessages(ctx, text)
 

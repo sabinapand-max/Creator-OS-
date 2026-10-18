@@ -16,7 +16,7 @@
 import { usePilotStore, useUIStore } from '@/lib/stores'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Compass, Brain, HeartHandshake, ArrowRight } from 'lucide-react'
+import { Compass, Brain, Flame, HeartHandshake, ArrowRight } from 'lucide-react'
 import type {
   CognitiveEnergy,
   CognitiveSensory,
@@ -42,6 +42,7 @@ export function MindMap() {
   const { setActiveTab } = useUIStore()
   const map = usePilotStore((s) => s.cognitiveMap)
   const checkIn = usePilotStore((s) => s.checkIn)
+  const spark = usePilotStore((s) => s.spark)
 
   return (
     <div className="min-h-screen p-6 lg:p-8">
@@ -88,6 +89,20 @@ export function MindMap() {
             <Movements history={map.history} />
           </>
         )}
+
+        {/* One quiet doorway to the one-time strengths profile. Optional, always. */}
+        <div className="pt-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setActiveTab('spark')}
+            className="text-muted-foreground"
+          >
+            <Flame className="mr-2 h-4 w-4 text-primary/70" />
+            {spark ? 'Your spark profile' : 'Know your spark — one time, forty taps'}
+            <ArrowRight className="ml-1 h-4 w-4" />
+          </Button>
+        </div>
       </div>
     </div>
   )

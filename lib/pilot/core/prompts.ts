@@ -56,6 +56,8 @@ export interface PromptContext {
   history: Message[]
   /** Optional one-line read of today's cognitive state, so replies acknowledge capacity. */
   cognitiveNote?: string | null
+  /** Optional one-line strengths-first SPARK profile, so replies frame people by signal, not deficit. */
+  sparkNote?: string | null
 }
 
 function truncate(text: string, max: number): string {
@@ -97,6 +99,13 @@ export function buildContextBlock(ctx: PromptContext): string {
     lines.push('')
     lines.push(
       `WHERE THEY ARE RUNNING TODAY: ${ctx.cognitiveNote}. Use this only to size the next action to their capacity — do not recite it back to them.`
+    )
+  }
+
+  if (ctx.sparkNote) {
+    lines.push('')
+    lines.push(
+      `WHO THEY ARE (STRENGTHS-FIRST): ${ctx.sparkNote}. Frame your interpretation through these strengths; never pathologise them.`
     )
   }
 
