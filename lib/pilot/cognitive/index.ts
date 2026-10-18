@@ -213,6 +213,27 @@ export async function describeMap(db: Db, userId: string): Promise<CognitiveMap 
 }
 
 /**
+ * Record a manual Mind check-in: the person taps today's energy and/or sensory level
+ * directly, instead of waiting for a brain dump to imply it. Appends a dated history
+ * entry even when the state name is unchanged, so the map visibly responds and the
+ * pattern engine can see the new reading. Rule-based and free — no model, no network.
+ * Returns the refreshed map, or null if nothing could be persisted.
+ */
+export async function checkInAndPersist(
+  db: Db,
+  userId: string,
+  patch: { energy?: CognitiveEnergy; sensory?: CognitiveSensory }
+): Promise<CognitiveMap | null> {
+  const prior = (await repo.getCognitiveState(db, userId)) ?? createInitialState()
+  let next = prior
+  if (patch.energy) next = setEnergy(next, patch.energy)
+  if (patch.sensory) next = setSensory(next, patch.sensory)
+  next = transition(next, next.current, { energy: next.energy, sensory: next.sensory })
+  await repo.upsertCognitiveState(db, userId, next)
+  return describeMap(db, userId)
+}
+
+/**
  * What the daily pulse needs about a person: today's capacity, one sized micro-step, and
  * at most one gentle pattern observation. Null when the person has no recorded state yet,
  * so a brand-new user just gets the plain open-door check-in rather than an analysis.

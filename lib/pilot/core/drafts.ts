@@ -109,7 +109,7 @@ Worked example of a correct answer:
     {
       "channel": "linkedin",
       "hook": "I spent a year optimising my workflow instead of shipping the thing.",
-      "body": "Three unfinished projects, six focused hours a week.\\n\\nI kept building systems to manage the work rather than doing it. The newsletter is the one asset I actually want, so this week it gets the first 45 minutes, not the last.\\n\\nIf you are also running a one-person studio: what is the thing you keep postponing behind a better system?",
+      "body": "Three unfinished projects, six focused hours a week.\\n\\nI kept building systems to manage the work rather than doing it. So this week one project gets the first 45 minutes, not the last.\\n\\nIf you are also running a one-person studio: what is the thing you keep postponing behind a better system?",
       "hashtags": ["solocreator", "neurodivergent", "buildinginpublic"]
     }
   ]

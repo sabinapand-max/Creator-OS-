@@ -41,6 +41,7 @@ const SENSORY_ORDER: CognitiveSensory[] = ['calm', 'moderate', 'elevated', 'over
 export function MindMap() {
   const { setActiveTab } = useUIStore()
   const map = usePilotStore((s) => s.cognitiveMap)
+  const checkIn = usePilotStore((s) => s.checkIn)
 
   return (
     <div className="min-h-screen p-6 lg:p-8">
@@ -61,11 +62,25 @@ export function MindMap() {
               label={map.label}
               capacityNote={map.capacityNote}
               microStep={map.microStep}
+              onStart={() => setActiveTab('brain-dump')}
             />
 
+            <p className="px-1 text-xs text-muted-foreground">
+              Tap where you actually are today &mdash; the map updates as you check in.
+            </p>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Gauge title="Energy" value={map.energy} levels={ENERGY_ORDER} />
-              <Gauge title="Sensory load" value={map.sensory} levels={SENSORY_ORDER} />
+              <Gauge
+                title="Energy"
+                value={map.energy}
+                levels={ENERGY_ORDER}
+                onSelect={(v) => checkIn({ energy: v })}
+              />
+              <Gauge
+                title="Sensory load"
+                value={map.sensory}
+                levels={SENSORY_ORDER}
+                onSelect={(v) => checkIn({ sensory: v })}
+              />
             </div>
 
             {map.patternNote && <PatternNote note={map.patternNote} burnoutRisk={map.burnoutRisk} />}
@@ -105,10 +120,12 @@ function TodayCard({
   label,
   capacityNote,
   microStep,
+  onStart,
 }: {
   label: string
   capacityNote: string
   microStep: string
+  onStart: () => void
 }) {
   return (
     <Card className="border-primary/20 bg-primary/5">
@@ -116,24 +133,31 @@ function TodayCard({
         <CardTitle className="text-xl">{label} today</CardTitle>
         <CardDescription>{capacityNote}</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
         <p className="text-sm text-foreground">
           <span className="font-medium">Sized for today:</span> {microStep}
         </p>
+        <Button onClick={onStart} size="sm">
+          <Brain className="mr-2 h-4 w-4" />
+          Start here
+          <ArrowRight className="ml-1 h-4 w-4" />
+        </Button>
       </CardContent>
     </Card>
   )
 }
 
-/** A single, non-judgemental indicator: the active level is highlighted, none is "wrong". */
+/** A single, non-judgemental indicator you can tap. The active level is highlighted; none is "wrong". */
 function Gauge<T extends string>({
   title,
   value,
   levels,
+  onSelect,
 }: {
   title: string
   value: T
   levels: T[]
+  onSelect: (value: T) => void
 }) {
   return (
     <Card className="border-border bg-card">
@@ -145,16 +169,20 @@ function Gauge<T extends string>({
           {levels.map((level) => {
             const active = level === value
             return (
-              <span
+              <button
                 key={level}
+                type="button"
+                onClick={() => onSelect(level)}
+                aria-pressed={active}
                 className={
-                  active
-                    ? 'rounded-full bg-primary/15 px-3 py-1 text-sm font-medium capitalize text-foreground ring-1 ring-primary/30'
-                    : 'rounded-full px-3 py-1 text-sm capitalize text-muted-foreground/60'
+                  'cursor-pointer rounded-full px-3 py-1 text-sm capitalize transition-colors ' +
+                  (active
+                    ? 'bg-primary/15 font-medium text-foreground ring-1 ring-primary/30'
+                    : 'text-muted-foreground/70 hover:bg-muted hover:text-foreground')
                 }
               >
                 {level}
-              </span>
+              </button>
             )
           })}
         </div>

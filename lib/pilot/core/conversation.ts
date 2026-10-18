@@ -41,7 +41,7 @@ import {
   type Directive,
 } from './directives.ts'
 import { recordObservedFacts } from './memory.ts'
-import { advanceAndPersist } from '../cognitive/index.ts'
+import { advanceAndPersist, describeCurrent } from '../cognitive/index.ts'
 import { buildTurnMessages, composeAssistantText } from './prompts.ts'
 
 export const MAX_TURN_CHARS = 20_000
@@ -170,6 +170,14 @@ export async function submitTurn(db: Db, input: SubmitTurnInput): Promise<Submit
   // appends it separately and a retry must not duplicate it in the prompt.
   const ctx = await promptContextForConversation(db, userId, conversation.id)
   ctx.history = ctx.history.filter((m) => m.id !== userMessage.id)
+  // Acknowledge how they have been running (from the Mind map's engine) so the reply
+  // sizes its next step to today's capacity. Read-only and free; never breaks a turn.
+  try {
+    const now = await describeCurrent(db, userId)
+    if (now) ctx.cognitiveNote = `${now.label}, ${now.energy} energy`
+  } catch {
+    ctx.cognitiveNote = null
+  }
   const messages = buildTurnMessages(ctx, text)
 
   let run: Awaited<ReturnType<typeof repo.createModelRun>>

@@ -12,7 +12,9 @@
  */
 import { create } from 'zustand'
 import type {
+  CognitiveEnergy,
   CognitiveMap,
+  CognitiveSensory,
   CognitiveSnapshot,
   Conversation,
   Fact,
@@ -131,6 +133,8 @@ interface PilotStore {
     projectTitle?: string | null
     idempotencyKey?: string | null
   }) => Promise<TurnOutcome>
+  /** Tap today's energy/sensory directly; updates the Mind map without a brain dump. */
+  checkIn: (input: { energy?: CognitiveEnergy; sensory?: CognitiveSensory }) => Promise<void>
   reset: () => void
 }
 
@@ -328,6 +332,14 @@ export const usePilotStore = create<PilotStore>()((set, get) => ({
       }
     } finally {
       set({ submitting: false })
+    }
+  },
+
+  checkIn: async (input) => {
+    const { data } = await postJson('/api/pilot/state', input)
+    if (data?.signedIn) {
+      // The POST returns the refreshed map directly, so no full re-read is needed.
+      set({ cognitive: data.cognitive ?? null, cognitiveMap: data.cognitiveMap ?? null })
     }
   },
 

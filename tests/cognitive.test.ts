@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import {
   advanceAndPersist,
   advanceState,
+  checkInAndPersist,
   dailyCognitiveBriefing,
   describeCurrent,
   describeMap,
@@ -241,6 +242,45 @@ test('describeMap returns a superset of the snapshot plus history, pattern note 
     assert.equal(map!.history.length, 1)
     assert.ok(map!.patternNote && /gentle/i.test(map!.patternNote))
     assert.ok(['low', 'medium', 'high'].includes(map!.burnoutRisk))
+  } finally {
+    dispose()
+  }
+})
+
+/* ------------------------------------------------------ Slice 3b: manual Mind check-in */
+
+test('checkInAndPersist applies a manual energy tap and records a movement', async () => {
+  const { db, dispose } = tempStore()
+  try {
+    const user = await makeUser(db, 'checkin@example.com')
+
+    // A brand-new user has no state; a check-in still works from the initial state.
+    const map = await checkInAndPersist(db, user.id, { energy: 'low' })
+    assert.ok(map)
+    assert.equal(map!.energy, 'low')
+    assert.equal(map!.current, STATES.DORMANT)
+    // The tap appends a dated history entry so the map visibly responds.
+    assert.equal(map!.history.length, 1)
+
+    // A second, different tap persists alongside the first and adds another movement.
+    const again = await checkInAndPersist(db, user.id, { sensory: 'overload' })
+    assert.equal(again!.energy, 'low')
+    assert.equal(again!.sensory, 'overload')
+    assert.equal(again!.history.length, 2)
+  } finally {
+    dispose()
+  }
+})
+
+test('checkInAndPersist returns the current map even when the patch changes nothing', async () => {
+  const { db, dispose } = tempStore()
+  try {
+    const user = await makeUser(db, 'checkin2@example.com')
+    await advanceAndPersist(db, user.id, 'I am overwhelmed and running on empty')
+
+    const map = await checkInAndPersist(db, user.id, {})
+    assert.ok(map)
+    assert.equal(map!.current, STATES.OVERWHELMED)
   } finally {
     dispose()
   }
