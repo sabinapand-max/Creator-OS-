@@ -65,6 +65,14 @@ function sqliteMigrate(sdb: DatabaseSync): void {
   sdb.exec('PRAGMA foreign_keys = ON')
   sdb.exec('PRAGMA busy_timeout = 5000')
   sdb.exec(SCHEMA_SQL)
+  // Additive column migration for stores created before the paywall. SQLite has
+  // no IF NOT EXISTS for ADD COLUMN, so re-running is expected to throw and is
+  // swallowed. SCHEMA_VERSION stays 1: this is additive, like the drafts table.
+  try {
+    sdb.exec(`ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'`)
+  } catch {
+    /* column already present */
+  }
 
   const row = sdb
     .prepare('SELECT value FROM schema_meta WHERE key = ?')
@@ -118,6 +126,9 @@ function neonMigrate(pool: Pool): Promise<void> {
     // SCHEMA_SQL is idempotent (IF NOT EXISTS) and has no bound params, so the
     // whole multi-statement script runs as a single simple query.
     await pool.query(SCHEMA_SQL)
+    // Additive column migration for Neon stores predating the paywall. Postgres
+    // supports IF NOT EXISTS, so this is safe to re-run on every boot.
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free'`)
     const r = await pool.query('SELECT value FROM schema_meta WHERE key = $1', [
       'schema_version',
     ])

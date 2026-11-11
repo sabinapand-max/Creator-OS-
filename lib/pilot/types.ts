@@ -17,7 +17,12 @@ export interface User {
   email: string
   displayName: string
   createdAt: string
+  /** Entitlement for the hosted default model. 'free' must bring their own key. */
+  plan: Plan
 }
+
+/** Pilot entitlement tier. Manual for now: flip a user to 'paid' by hand. */
+export type Plan = 'free' | 'paid'
 
 export interface Project {
   id: string
@@ -114,6 +119,7 @@ export type ModelFailureCode =
   | 'model_http_error'
   | 'model_invalid_response'
   | 'model_endpoint_unsafe'
+  | 'byok_required'
 
 export interface ModelFailure {
   ok: false
@@ -183,6 +189,7 @@ export type DraftChannel =
   | 'twitter'
   | 'gumroad'
   | 'fiverr'
+  | 'kofi'
 
 export const SOCIAL_CHANNELS: DraftChannel[] = [
   'linkedin',
@@ -191,7 +198,7 @@ export const SOCIAL_CHANNELS: DraftChannel[] = [
   'pinterest',
   'twitter',
 ]
-export const OFFER_CHANNELS: DraftChannel[] = ['gumroad', 'fiverr']
+export const OFFER_CHANNELS: DraftChannel[] = ['gumroad', 'fiverr', 'kofi']
 
 /** Channel-shaped extras. Only the fields relevant to `channel` are filled in. */
 export interface DraftPayload {

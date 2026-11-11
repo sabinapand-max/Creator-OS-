@@ -28,6 +28,7 @@ import {
   Ban,
   Briefcase,
   Check,
+  Coffee,
   Copy,
   DollarSign,
   Loader2,
@@ -43,6 +44,7 @@ import { ModelStatusCard } from './sign-in'
 const tabs: { id: MarketplaceTab; label: string; description: string }[] = [
   { id: 'gumroad', label: 'Gumroad', description: 'Digital products & courses' },
   { id: 'fiverr', label: 'Fiverr', description: 'Services & gigs' },
+  { id: 'kofi', label: 'Ko-fi', description: 'Tips, shop items & memberships' },
   { id: 'etsy', label: 'Etsy', description: 'Out of scope for this pilot' },
 ]
 
@@ -170,7 +172,7 @@ export function MarketplaceGenerator() {
               <p className="text-muted-foreground mt-2 max-w-md">
                 This pilot deliberately excludes Etsy listings, product inventory and stock counts,
                 so nothing generates them and the model is told not to propose them either.
-                Gumroad and Fiverr drafts are real and available now.
+                Gumroad, Fiverr and Ko-fi drafts are real and available now.
               </p>
               <div className="mt-4 flex flex-wrap justify-center gap-2">
                 <Button onClick={() => setMarketplaceTab('gumroad')} className="gap-2">
@@ -205,7 +207,7 @@ export function MarketplaceGenerator() {
                   <p className="text-sm font-medium text-foreground">Where the offer goes</p>
                   <div className="flex flex-wrap gap-2">
                     {OFFER_CHANNELS.map((channel) => {
-                      const Icon = channel === 'gumroad' ? ShoppingBag : Briefcase
+                      const Icon = channel === 'gumroad' ? ShoppingBag : channel === 'kofi' ? Coffee : Briefcase
                       const isOn = selected.includes(channel)
                       return (
                         <button
@@ -221,7 +223,7 @@ export function MarketplaceGenerator() {
                           )}
                         >
                           <Icon className="h-4 w-4" />
-                          {channel}
+                          {channel === 'kofi' ? 'Ko-fi' : channel}
                         </button>
                       )
                     })}

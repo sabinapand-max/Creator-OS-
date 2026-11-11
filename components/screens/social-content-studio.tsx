@@ -57,6 +57,7 @@ const channelIcons: Record<DraftChannel, React.ElementType> = {
   pinterest: Pin,
   gumroad: Share2,
   fiverr: Share2,
+  kofi: Share2,
 }
 
 const channelColors: Record<DraftChannel, string> = {
@@ -67,6 +68,7 @@ const channelColors: Record<DraftChannel, string> = {
   pinterest: 'bg-red-500/20 text-red-400',
   gumroad: 'bg-chart-3/20 text-chart-3',
   fiverr: 'bg-chart-5/20 text-chart-5',
+  kofi: 'bg-orange-500/20 text-orange-400',
 }
 
 /** The text a user copies out: body, then hashtags when there are any. */

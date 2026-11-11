@@ -73,10 +73,20 @@ export function verifyPassword(password: string, stored: string): boolean {
 export interface AccountResult {
   ok: boolean
   userId?: string
-  error?: 'email_taken' | 'invalid_credentials' | 'weak_password' | 'invalid_email'
+  error?: 'email_taken' | 'invalid_credentials' | 'weak_password' | 'invalid_email' | 'too_many_attempts'
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/**
+ * Free-beta allowance. When PILOT_SIGNUP_TRIAL_TURNS is set to a positive number,
+ * every new account is issued that many hosted-model turns as an already-redeemed
+ * trial grant, so a signup can use the hosted default without carrying a code.
+ * Zero (default) keeps the current owner-hand-coded behaviour and existing tests.
+ * PILOT_SIGNUP_TRIAL_DAYS bounds how long the grant lasts; empty means no expiry.
+ */
+const SIGNUP_TRIAL_TURNS = Math.max(0, Number(process.env.PILOT_SIGNUP_TRIAL_TURNS ?? 0) || 0)
+const SIGNUP_TRIAL_DAYS_RAW = Number(process.env.PILOT_SIGNUP_TRIAL_DAYS ?? 0) || 0
 
 export async function registerAccount(
   db: Db,
@@ -94,24 +104,72 @@ export async function registerAccount(
     passwordHash: hashPassword(input.password),
   })
   await repo.audit(db, { userId: user.id, action: 'account.registered', detail: email })
+
+  if (SIGNUP_TRIAL_TURNS > 0) {
+    const now = repo.nowIso()
+    const expiresAt =
+      SIGNUP_TRIAL_DAYS_RAW > 0
+        ? new Date(Date.now() + SIGNUP_TRIAL_DAYS_RAW * 24 * 60 * 60 * 1000).toISOString()
+        : null
+    // Derive the hash from a per-user secret that never surfaces as plaintext.
+    // The row's only job is to be picked up by getTrialGrant; redeemTrialCode
+    // cannot reach it because no canonical IND-format code exists for this hash.
+    const codeHash = sha256(`signup-grant|${user.id}|${now}`)
+    await repo.insertRedeemedTrialGrant(db, {
+      id: randomUUID(),
+      codeHash,
+      turns: SIGNUP_TRIAL_TURNS,
+      note: 'signup-grant',
+      createdAt: now,
+      expiresAt,
+      redeemedBy: user.id,
+      redeemedAt: now,
+    })
+    await repo.audit(db, {
+      userId: user.id,
+      action: 'trial.granted_on_signup',
+      detail: `${SIGNUP_TRIAL_TURNS} hosted turns${expiresAt ? `, until ${expiresAt}` : ''}`,
+    })
+  }
+
   return { ok: true, userId: user.id }
 }
+
+/**
+ * Brute-force brake. Password hashing is deliberately expensive, so an unthrottled
+ * sign-in endpoint is both a credential-stuffing target and a cheap CPU denial of
+ * service on a pay-per-invocation host. Attempts are counted per email (hashed, so
+ * the table never stores an address in the clear) over a rolling window, and a
+ * successful sign-in clears them.
+ */
+const LOGIN_WINDOW_MS = 15 * 60 * 1000
+export const LOGIN_MAX_ATTEMPTS = Math.max(
+  3,
+  Number(process.env.PILOT_LOGIN_MAX_ATTEMPTS ?? 8) || 8
+)
 
 export async function signIn(
   db: Db,
   input: { email: string; password: string }
 ): Promise<AccountResult & { sessionId?: string; sessionExpiresAt?: string }> {
   const email = input.email.trim().toLowerCase()
+  const emailHash = sha256(email)
+  const attempts = await repo.countRecentAuthAttempts(db, emailHash, new Date(Date.now() - LOGIN_WINDOW_MS).toISOString())
+  if (attempts >= LOGIN_MAX_ATTEMPTS) return { ok: false, error: 'too_many_attempts' }
+
   const user = await repo.getUserByEmail(db, email)
   // Verify against a dummy hash when the account is missing so response time
   // does not reveal whether an email is registered.
   if (!user) {
     verifyPassword(input.password, hashPassword('timing-equaliser'))
+    await repo.recordAuthAttempt(db, emailHash)
     return { ok: false, error: 'invalid_credentials' }
   }
   if (!verifyPassword(input.password, user.passwordHash)) {
+    await repo.recordAuthAttempt(db, emailHash)
     return { ok: false, error: 'invalid_credentials' }
   }
+  await repo.clearAuthAttempts(db, emailHash)
   const session = await repo.createSession(db, user.id, SESSION_TTL_MS)
   return { ok: true, userId: user.id, sessionId: session.id, sessionExpiresAt: session.expiresAt }
 }

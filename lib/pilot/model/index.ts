@@ -10,8 +10,10 @@
  *    Latency is measured on every call so a local model can be compared.
  *  - A hosted runtime is refused if it is pointed at a loopback endpoint, because
  *    its own localhost is not the user's laptop.
- *  - The API key is read from the server environment only. It is never accepted
- *    from a request body and never included in an error message or log line.
+ *  - By default the API key is read from the server environment. A signed-in user
+ *    may instead bring their own endpoint and key for a single request (BYOK). That
+ *    key is used for that one call only: never logged, never echoed in an error, and
+ *    never written to the database or browser storage.
  */
 import { z } from 'zod'
 import type { ModelFailure, ModelOutcome, TurnResult } from '../types.ts'
@@ -28,6 +30,21 @@ export interface ModelConfig {
   hosted: boolean
   /** Explicit override permitting a loopback endpoint. Off by default. */
   allowLoopbackModel: boolean
+  /**
+   * Set by the paywall gate (see resolveModelConfigForUser) to force an honest
+   * failure without ever dialling the paid hosted endpoint. describeReadiness
+   * returns this as-is when present. A real user key (BYOK) never carries it.
+   */
+  gate?: { code: ModelFailure['code']; message: string }
+  /**
+   * Which entitlement produced this config, when the hosted default is being
+   * handed out at all: 'paid' for a paying account, 'trial' for an account holding
+   * a code the owner issued. A BYOK connection carries neither — it is free
+   * because it is billed to the person who supplied the key.
+   */
+  entitlement?: 'paid' | 'trial'
+  /** Hosted turns left on a trial, computed at resolve time. Reported to the UI. */
+  trialTurnsRemaining?: number
 }
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'])
@@ -91,6 +108,59 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env): ModelConf
   }
 }
 
+/**
+ * A bring-your-own-key (BYOK) override, supplied transiently for a single request.
+ * Values are `unknown` because they arrive straight from a request body; each is
+ * checked before use. Nothing here is persisted: the key is used for one model
+ * call and then dropped.
+ */
+export interface ByokOverride {
+  provider?: unknown
+  baseUrl?: unknown
+  modelId?: unknown
+  apiKey?: unknown
+}
+
+/**
+ * Merge a BYOK override onto the server's environment config for one request.
+ *
+ * The override only activates when it carries a usable endpoint AND a model id,
+ * so a half-filled form returns undefined and the caller falls back to the server
+ * configuration rather than dialling a blank endpoint. The key is taken exactly as
+ * supplied and never falls back to the server's own key: if you bring a connection,
+ * you pay for it. Hosted/loopback safety flags are inherited so a remote runtime
+ * still refuses to treat its own localhost as the user's machine.
+ */
+export function buildModelConfigFromOverride(
+  override: ByokOverride,
+  env: NodeJS.ProcessEnv = process.env
+): ModelConfig | undefined {
+  const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
+  const base = readModelConfig(env)
+  const baseUrl = str(override.baseUrl).replace(/\/+$/, '')
+  const modelId = str(override.modelId)
+  if (!baseUrl || !modelId) return undefined
+
+  const apiKey = str(override.apiKey) || null
+  const rawProvider = str(override.provider).toLowerCase()
+  const provider: ProviderKind =
+    rawProvider === 'lmstudio' || rawProvider === 'openai-compatible' || rawProvider === 'openrouter'
+      ? rawProvider
+      : /openrouter\.ai/.test(baseUrl)
+        ? 'openrouter'
+        : 'openai-compatible'
+
+  return {
+    provider,
+    modelId,
+    baseUrl,
+    apiKey,
+    timeoutMs: base.timeoutMs,
+    hosted: base.hosted,
+    allowLoopbackModel: base.allowLoopbackModel,
+  }
+}
+
 export type ModelReadiness =
   | { ready: true; provider: string; modelId: string; baseUrl: string; local: boolean }
   | { ready: false; code: ModelFailure['code']; message: string }
@@ -101,6 +171,11 @@ export type ModelReadiness =
  * Never exposes the key, only whether one is present.
  */
 export function describeReadiness(config: ModelConfig = readModelConfig()): ModelReadiness {
+  // The paywall gate short-circuits everything below: a gated call must fail
+  // honestly and must never reach the network, so no paid endpoint is dialled.
+  if (config.gate) {
+    return { ready: false, code: config.gate.code, message: config.gate.message }
+  }
   if (!config.modelId) {
     return {
       ready: false,
@@ -135,12 +210,22 @@ export function describeReadiness(config: ModelConfig = readModelConfig()): Mode
       message: `Endpoint ${config.baseUrl} needs a key but AI_API_KEY is not set. No request will be made and no placeholder content will be shown.`,
     }
   }
+  // A loopback URL alone must not declare the endpoint "local": the self-loop
+  // Adaption adapter is reached over 127.0.0.1 but forwards to a cloud GPU, and
+  // "nothing leaves this machine" would then be a privacy lie. AI_LOCATION
+  // overrides the URL-derived label; unset keeps the old behaviour, so LM Studio
+  // and other genuinely local servers stay correctly marked local.
+  const locationOverride = (process.env.AI_LOCATION || '').trim().toLowerCase()
+  const local =
+    locationOverride === 'hosted' ? false
+      : locationOverride === 'local' ? true
+        : isLoopbackUrl(config.baseUrl)
   return {
     ready: true,
     provider: config.provider,
     modelId: config.modelId,
     baseUrl: config.baseUrl,
-    local: isLoopbackUrl(config.baseUrl),
+    local,
   }
 }
 

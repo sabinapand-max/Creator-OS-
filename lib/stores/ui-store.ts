@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 export type ActiveTab = 'dashboard' | 'mind' | 'spark' | 'brain-dump' | 'marketplace' | 'social' | 'memory' | 'settings'
-export type MarketplaceTab = 'etsy' | 'gumroad' | 'fiverr'
+export type MarketplaceTab = 'etsy' | 'gumroad' | 'fiverr' | 'kofi'
 
 interface ProviderSettings {
   groqKey: string

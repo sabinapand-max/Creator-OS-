@@ -8,10 +8,13 @@
  * and Marketplace used to read — nothing ever wrote to it, which is why both
  * screens only showed empty states.
  *
- * No model key is held or sent here. Generation happens server-side.
+ * Generation happens server-side. If the user has brought their own key, it is
+ * read from the memory-only byok store and sent inside this one request; it is
+ * never persisted here.
  */
 import { create } from 'zustand'
 import type { ContentDraft, DraftChannel, DraftKind } from '@/lib/pilot/types.ts'
+import { currentByok } from './byok-store'
 
 /** What one call to /api/pilot/drafts produced. The UI renders these verbatim. */
 export type DraftsOutcome =
@@ -133,7 +136,8 @@ export const useDraftsStore = create<DraftsStore>()((set, get) => ({
       const res = await fetch('/api/pilot/drafts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
+        // A memory-only BYOK connection, if set, rides along for this one request.
+        body: JSON.stringify({ ...input, byok: currentByok() }),
       })
       const data = await readJson(res)
 

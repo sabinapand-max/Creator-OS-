@@ -53,11 +53,11 @@ export function SignInScreen() {
       <div className="w-full max-w-md space-y-4">
         <Card className="bg-card border-border">
           <CardHeader>
-            <CardTitle className="text-xl">Indigos — private pilot</CardTitle>
+            <CardTitle className="text-xl">Indigos</CardTitle>
             <CardDescription>
-              Three-person pilot. Your brain dumps, remembered facts and next actions are stored
-              server-side against your account, so the same conversation can continue later and on
-              another device.
+              A capacity-aware workspace for neurodivergent solo creators. Your brain dumps,
+              remembered facts and next actions are stored server-side against your account, so the
+              same conversation can continue later and on another device.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -125,7 +125,7 @@ export function SignInScreen() {
                 ) : (
                   <LogIn className="h-4 w-4" />
                 )}
-                {mode === 'register' ? 'Create pilot account' : 'Sign in'}
+                {mode === 'register' ? 'Create account' : 'Sign in'}
               </Button>
 
               <Button
@@ -140,13 +140,24 @@ export function SignInScreen() {
               >
                 {mode === 'register'
                   ? 'Already have an account? Sign in'
-                  : 'New to the pilot? Create an account'}
+                  : 'New here? Create an account'}
               </Button>
+
+              {mode === 'register' && (
+                <p className="text-xs text-muted-foreground">
+                  Every new account includes a free 14-day trial of the hosted model — 20 generations,
+                  no card and no code needed. Bring your own key in Settings any time to keep going
+                  after that.
+                </p>
+              )}
             </form>
           </CardContent>
         </Card>
 
-        <ModelStatusCard />
+        {/* Deliberately no model readout here: this screen is public, and printing
+            the hosted endpoint and model id to anonymous visitors tells anyone
+            where the inference runs. The same honest card shows in-app, once a
+            real account is behind the session cookie. */}
 
         {loadError && (
           <p className="text-center text-xs text-muted-foreground">
@@ -190,7 +201,7 @@ export function ModelStatusCard({ compact = false }: { compact?: boolean }) {
           <p className="text-xs text-muted-foreground">
             {model.local
               ? 'Local endpoint. No API key needed and nothing leaves this machine.'
-              : `Remote endpoint (${model.provider}). Key held server-side only.`}
+              : `Hosted by Indigos (${model.provider}) — no key needed from you, and you can bring your own key in Settings any time to run on your own account.`}
           </p>
         </CardContent>
       </Card>

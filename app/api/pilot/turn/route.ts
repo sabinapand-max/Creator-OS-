@@ -7,13 +7,16 @@
  * honest HTTP response. A model outage returns 503 with the reason and keeps the
  * user's input, so the client can retry with the same idempotency key.
  *
- * The API key is never read from the request. It comes from the server
- * environment inside the model layer.
+ * Model configuration comes from the server environment by default. A signed-in
+ * user may instead bring their own endpoint and key for this one request (BYOK):
+ * it is passed straight to the model layer, used for the single call, and never
+ * logged, echoed, or written to the database or browser storage.
  */
 import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/pilot/db/client.ts'
 import { submitTurn } from '@/lib/pilot/core/conversation.ts'
 import { requireUser } from '@/lib/pilot/web/session.ts'
+import { buildModelConfigFromOverride } from '@/lib/pilot/model/index.ts'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -35,6 +38,12 @@ export async function POST(request: Request) {
   const projectTitle = typeof body?.projectTitle === 'string' ? body.projectTitle : null
   const idempotencyKey = typeof body?.idempotencyKey === 'string' ? body.idempotencyKey : null
 
+  // Optional bring-your-own-key for this one turn. Used transiently by the model
+  // layer; never logged, echoed, or written to the database. Falls back to the
+  // server configuration when absent or incomplete.
+  const byok = body?.byok && typeof body.byok === 'object' ? body.byok : undefined
+  const modelConfig = byok ? buildModelConfigFromOverride(byok) : undefined
+
   const result = await submitTurn(getDb(), {
     userId: auth.userId,
     text,
@@ -43,6 +52,7 @@ export async function POST(request: Request) {
     projectId,
     projectTitle,
     idempotencyKey,
+    modelConfig,
   })
 
   if (!result.ok) {

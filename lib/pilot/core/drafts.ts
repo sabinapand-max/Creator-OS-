@@ -29,11 +29,11 @@ import * as repo from '../db/repo.ts'
 import {
   callModel,
   extractJsonObject,
-  readModelConfig,
   repairJsonSyntax,
   type CallOptions,
   type ModelConfig,
 } from '../model/index.ts'
+import { resolveModelConfigForUser } from '../web/modelAccess.ts'
 import {
   OFFER_CHANNELS,
   SOCIAL_CHANNELS,
@@ -115,7 +115,7 @@ Worked example of a correct answer:
   ]
 }`
 
-/** The JSON contract for an offer draft (Gumroad product or Fiverr gig). */
+/** The JSON contract for an offer draft (Gumroad product, Fiverr gig or Ko-fi item). */
 const OFFER_SHAPE = `Respond with ONLY a JSON object, no prose and no code fence, in exactly this shape:
 {
   "drafts": [
@@ -134,6 +134,7 @@ const OFFER_SHAPE = `Respond with ONLY a JSON object, no prose and no code fence
 Write exactly one draft for each of these channels, using these exact channel names: CHANNELS.
 For a "gumroad" draft, "body" is the product description and "packages" is an empty array.
 For a "fiverr" draft, "body" is the gig description and "packages" holds up to three service tiers.
+For a "kofi" draft, "body" is the shop-item or supporter-update description and "packages" holds up to three name-your-price tiers.
 
 Length rules, and they matter because a small local model runs out of room mid-answer:
 - Keep each body under 90 words. No marketing preamble, no repeated points.
@@ -483,7 +484,9 @@ export async function generateDrafts(
     }
   }
 
-  const config = input.modelConfig ?? readModelConfig()
+  // Paywall-aware, identical to the turn path: BYOK always, hosted default only
+  // when entitled, otherwise a gated config that fails without dialling the paid endpoint.
+  const config = await resolveModelConfigForUser(db, input.userId, input.modelConfig)
   const source = input.source ?? 'drafts:web'
   // A fresh key every call: see the note at the top of this file about why
   // drafts are not deduplicated the way turns are.

@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT NOT NULL UNIQUE,
   display_name  TEXT NOT NULL,
   password_hash TEXT NOT NULL,
-  created_at    TEXT NOT NULL
+  created_at    TEXT NOT NULL,
+  plan          TEXT NOT NULL DEFAULT 'free'
 );
 
 -- Web UI sessions (cookie bearer).
@@ -295,4 +296,40 @@ CREATE TABLE IF NOT EXISTS spark_results (
   result_json TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
+
+-- Free-trial codes, issued only by the owner and handed out by hand. A code is the
+-- single route by which a plan='free' account may consume the hosted default model,
+-- so "who gets a trial" stays a deliberate choice rather than an open floodgate.
+-- Only the SHA-256 hash of a code is stored, so a database leak yields no usable
+-- codes; a code is bound to exactly one account by a conditional UPDATE, so two
+-- people cannot redeem the same one. Turn usage is NOT counted in a counter column:
+-- it is read back from model_runs, the table that already proves a call happened.
+--
+-- SCHEMA_VERSION stays at 1: additive, every statement IF NOT EXISTS.
+CREATE TABLE IF NOT EXISTS trial_codes (
+  id          TEXT PRIMARY KEY,
+  code_hash   TEXT NOT NULL UNIQUE,
+  turns       INTEGER NOT NULL,
+  note        TEXT,
+  created_at  TEXT NOT NULL,
+  expires_at  TEXT,
+  redeemed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+  redeemed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_trial_codes_redeemed
+  ON trial_codes(redeemed_by, redeemed_at);
+
+-- Sign-in failures, counted per email. Registration is public now, so a password is
+-- the only thing between a stranger and someone's projects and drafts; repeated
+-- wrong guesses are slowed to a stop instead of being unlimited. Rows are written
+-- only on failure and cleared on success, and old rows are pruned as they are read.
+CREATE TABLE IF NOT EXISTS auth_attempts (
+  id         TEXT PRIMARY KEY,
+  email_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_attempts_email
+  ON auth_attempts(email_hash, created_at DESC);
 `

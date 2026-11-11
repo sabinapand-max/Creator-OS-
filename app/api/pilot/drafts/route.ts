@@ -6,8 +6,9 @@
  * rendered an empty state forever.
  *
  * Identity comes only from the session cookie; a `userId` in the body or query
- * is never read. The model key comes from the server environment inside the
- * model layer, never from the request.
+ * is never read. Model configuration comes from the server environment by default,
+ * or from a signed-in user's bring-your-own-key supplied for this one request — used
+ * transiently by the model layer and never logged, echoed, or written to the database.
  *
  * Nothing here publishes or sends anything. Generating a draft stores text the
  * user reads, edits and copies out by hand.
@@ -16,6 +17,7 @@ import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/pilot/db/client.ts'
 import { generateDrafts, listDrafts } from '@/lib/pilot/core/drafts.ts'
 import { requireUser } from '@/lib/pilot/web/session.ts'
+import { buildModelConfigFromOverride } from '@/lib/pilot/model/index.ts'
 import { OFFER_CHANNELS, SOCIAL_CHANNELS, type DraftKind } from '@/lib/pilot/types.ts'
 
 export const runtime = 'nodejs'
@@ -54,6 +56,10 @@ export async function POST(request: Request) {
   const projectId = typeof body?.projectId === 'string' ? body.projectId : null
   const brief = typeof body?.brief === 'string' ? body.brief : null
 
+  // Optional bring-your-own-key for this one generation; used transiently, never stored.
+  const byok = body?.byok && typeof body.byok === 'object' ? body.byok : undefined
+  const modelConfig = byok ? buildModelConfigFromOverride(byok) : undefined
+
   const result = await generateDrafts(getDb(), {
     userId: auth.userId,
     kind,
@@ -61,6 +67,7 @@ export async function POST(request: Request) {
     projectId,
     brief,
     source: 'drafts:web',
+    modelConfig,
   })
 
   if (!result.ok) {

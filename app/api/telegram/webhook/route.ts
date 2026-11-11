@@ -140,7 +140,10 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
       if (error instanceof Error && error.message === 'telegram_not_linked') {
         await sendTelegram(
           chatId,
-          'Indigos is invite-only right now. Open your Indigos dashboard, ask for a Telegram link code, then send /start followed by that code.'
+          // The branded domain still serves the landing page, which has no link into the
+          // app yet, so point at the app directly. Swap to app.indigos.uk once that
+          // domain is delegated to this Vercel project.
+          'Indigos works on Telegram once your chat is linked to an account. Create one free account at https://creator-os-source.vercel.app, open Settings, ask for a Telegram link code, then send /start followed by that code.'
         )
         return
       }

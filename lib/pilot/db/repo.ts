@@ -56,8 +56,8 @@ export async function createUser(
   const createdAt = nowIso()
   await db
     .prepare(
-      `INSERT INTO users (id, email, display_name, password_hash, created_at)
-     VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO users (id, email, display_name, password_hash, created_at, plan)
+     VALUES (?, ?, ?, ?, ?, 'free')`
     )
     .run(id, input.email.toLowerCase(), input.displayName, input.passwordHash, createdAt)
   return {
@@ -66,6 +66,7 @@ export async function createUser(
     displayName: input.displayName,
     passwordHash: input.passwordHash,
     createdAt,
+    plan: 'free',
   }
 }
 
@@ -76,6 +77,9 @@ function mapUser(row: any): UserRecord {
     displayName: row.display_name,
     passwordHash: row.password_hash,
     createdAt: row.created_at,
+    // Default to 'free' for any row predating the column (belt and braces on
+    // stores whose ALTER has not yet run).
+    plan: row.plan === 'paid' ? 'paid' : 'free',
   }
 }
 
@@ -111,8 +115,205 @@ export async function getUserById(db: Db, userId: string): Promise<UserRecord | 
   return row ? mapUser(row) : null
 }
 
+/** Entitlement tier for the hosted default model. Unknown user or absent column → 'free'. */
+export async function getUserPlan(db: Db, userId: string): Promise<'free' | 'paid'> {
+  const row = (await db.prepare('SELECT plan FROM users WHERE id = ?').get(userId)) as
+    | { plan?: string }
+    | undefined
+  return row?.plan === 'paid' ? 'paid' : 'free'
+}
+
+/** Manual entitlement flip: promote or demote a pilot account. Returns whether a row changed. */
+export async function setUserPlan(db: Db, userId: string, plan: 'free' | 'paid'): Promise<boolean> {
+  const r = await db.prepare('UPDATE users SET plan = ? WHERE id = ?').run(plan, userId)
+  return r.changes > 0
+}
+
+/* -------------------------------------------------------------- trial codes */
+
+export interface TrialCodeRow {
+  id: string
+  turns: number
+  note: string | null
+  createdAt: string
+  expiresAt: string | null
+  redeemedBy: string | null
+  redeemedAt: string | null
+}
+
+function mapTrialCode(row: any): TrialCodeRow {
+  return {
+    id: row.id,
+    // Postgres returns aggregates and INTEGER columns as strings in some drivers;
+    // Number() keeps the ceiling/floor math honest on both backends.
+    turns: Number(row.turns),
+    note: row.note ?? null,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at ?? null,
+    redeemedBy: row.redeemed_by ?? null,
+    redeemedAt: row.redeemed_at ?? null,
+  }
+}
+
+export async function insertTrialCode(
+  db: Db,
+  input: { id: string; codeHash: string; turns: number; note?: string; createdAt: string; expiresAt?: string | null }
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO trial_codes (id, code_hash, turns, note, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(input.id, input.codeHash, input.turns, input.note ?? null, input.createdAt, input.expiresAt ?? null)
+}
+
+export async function findTrialCodeByHash(db: Db, codeHash: string): Promise<TrialCodeRow | null> {
+  const row = (await db
+    .prepare('SELECT * FROM trial_codes WHERE code_hash = ?')
+    .get(codeHash)) as any
+  return row ? mapTrialCode(row) : null
+}
+
+export async function listTrialCodes(db: Db, limit = 100): Promise<TrialCodeRow[]> {
+  const rows = (await db
+    .prepare('SELECT * FROM trial_codes ORDER BY created_at DESC, id DESC LIMIT ?')
+    .all(limit)) as any[]
+  return rows.map(mapTrialCode)
+}
+
+/**
+ * Bind a code to an account, or refuse. The `redeemed_by IS NULL` guard makes the
+ * write atomic on both backends, so a double-click or two people racing on the same
+ * code produce exactly one winner (the loser sees changes = 0).
+ */
+export async function claimTrialCode(db: Db, codeId: string, userId: string): Promise<boolean> {
+  const r = await db
+    .prepare('UPDATE trial_codes SET redeemed_by = ?, redeemed_at = ? WHERE id = ? AND redeemed_by IS NULL')
+    .run(userId, nowIso(), codeId)
+  return r.changes > 0
+}
+
+/**
+ * Insert a trial grant that is already redeemed to `redeemedBy`, so the account
+ * holds the turns from the moment of signup. Used by the public-beta flow where
+ * every new account gets a fixed allowance without needing a code in hand.
+ *
+ * The `codeHash` is not a claimable code — nothing maps to it via redeemTrialCode
+ * because the caller generated it from a per-user secret with no plaintext stored
+ * anywhere. It exists to satisfy the UNIQUE constraint the manual-code flow needs.
+ */
+export async function insertRedeemedTrialGrant(
+  db: Db,
+  input: {
+    id: string
+    codeHash: string
+    turns: number
+    note?: string
+    createdAt: string
+    expiresAt?: string | null
+    redeemedBy: string
+    redeemedAt: string
+  }
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO trial_codes (id, code_hash, turns, note, created_at, expires_at, redeemed_by, redeemed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.id,
+      input.codeHash,
+      input.turns,
+      input.note ?? null,
+      input.createdAt,
+      input.expiresAt ?? null,
+      input.redeemedBy,
+      input.redeemedAt,
+    )
+}
+
+/**
+ * What a code entitles this account to: the sum of every code it has ever redeemed,
+ * measured from the first redemption. Stacking is therefore automatic — two codes of
+ * five turns mean ten hosted turns, counted from the day the first was redeemed.
+ *
+ * Expired grants are excluded, so a time-boxed trial (e.g. the 14-day beta window
+ * granted at signup) stops unlocking the hosted model once its window closes, even
+ * if turns remain unspent. An extended code redeemed later re-opens the door.
+ */
+export async function getTrialGrant(
+  db: Db,
+  userId: string
+): Promise<{ turns: number; since: string } | null> {
+  const now = nowIso()
+  const row = (await db
+    .prepare(
+      `SELECT COALESCE(SUM(turns), 0) AS turns, MIN(redeemed_at) AS first_redeemed
+       FROM trial_codes
+       WHERE redeemed_by = ? AND (expires_at IS NULL OR expires_at > ?)`
+    )
+    .get(userId, now)) as { turns?: string | number; first_redeemed?: string } | undefined
+  const turns = Number(row?.turns ?? 0)
+  if (!turns || !row?.first_redeemed) return null
+  return { turns, since: row.first_redeemed }
+}
+
+/**
+ * True when the account has ever held a trial grant, expired or not. Lets the
+ * gate say "your trial has ended" instead of "this is a paid plan" when the
+ * window simply lapsed with turns still unspent.
+ */
+export async function hasRedeemedTrial(db: Db, userId: string): Promise<boolean> {
+  const row = await db
+    .prepare('SELECT 1 AS hit FROM trial_codes WHERE redeemed_by = ? LIMIT 1')
+    .get(userId)
+  return Boolean(row)
+}
+
+/**
+ * Hosted turns already spent by this account since `since`. Read from model_runs,
+ * which records the endpoint of every attempt: matching on the hosted base URL is
+ * what separates a paid/trial run from one made with the user's own key, so BYOK
+ * generations never eat into a trial.
+ */
+export async function countHostedTurns(
+  db: Db,
+  userId: string,
+  since: string,
+  endpoint: string
+): Promise<number> {
+  const row = (await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM model_runs
+       WHERE user_id = ? AND status = 'succeeded' AND endpoint = ? AND created_at >= ?`
+    )
+    .get(userId, endpoint, since)) as { n?: string | number } | undefined
+  return Number(row?.n ?? 0)
+}
+
+/* ----------------------------------------------------------- login throttle */
+
+export async function recordAuthAttempt(db: Db, emailHash: string): Promise<void> {
+  await db
+    .prepare('INSERT INTO auth_attempts (id, email_hash, created_at) VALUES (?, ?, ?)')
+    .run(randomUUID(), emailHash, nowIso())
+}
+
+/** Failures for this email inside the window. Prunes its own history so the table cannot grow. */
+export async function countRecentAuthAttempts(db: Db, emailHash: string, sinceIso: string): Promise<number> {
+  await db.prepare('DELETE FROM auth_attempts WHERE created_at < ?').run(sinceIso)
+  const row = (await db
+    .prepare('SELECT COUNT(*) AS n FROM auth_attempts WHERE email_hash = ? AND created_at >= ?')
+    .get(emailHash, sinceIso)) as { n?: string | number } | undefined
+  return Number(row?.n ?? 0)
+}
+
+export async function clearAuthAttempts(db: Db, emailHash: string): Promise<void> {
+  await db.prepare('DELETE FROM auth_attempts WHERE email_hash = ?').run(emailHash)
+}
+
 export function toPublicUser(u: UserRecord): User {
-  return { id: u.id, email: u.email, displayName: u.displayName, createdAt: u.createdAt }
+  return { id: u.id, email: u.email, displayName: u.displayName, createdAt: u.createdAt, plan: u.plan }
 }
 
 /* --------------------------------------------------------------- sessions */

@@ -27,6 +27,7 @@ const ERROR_TEXT: Record<string, string> = {
   weak_password: 'Use at least 10 characters for your password.',
   email_taken: 'That email already has a pilot account. Sign in instead.',
   invalid_credentials: 'Email and password do not match.',
+  too_many_attempts: 'Too many failed sign-in attempts. Wait a few minutes and try again.',
 }
 
 const WAITLIST_HINT =
@@ -94,7 +95,7 @@ export async function POST(request: Request) {
   if (!result.ok || !result.sessionId) {
     return NextResponse.json(
       { ok: false, error: ERROR_TEXT[result.error ?? ''] ?? 'Sign-in failed.' },
-      { status: result.error === 'invalid_credentials' ? 401 : 400 }
+      { status: result.error === 'too_many_attempts' ? 429 : result.error === 'invalid_credentials' ? 401 : 400 }
     )
   }
 

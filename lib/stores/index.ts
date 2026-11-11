@@ -17,6 +17,11 @@ export {
 } from './ai-generation-store'
 export { useUIStore, type ActiveTab, type MarketplaceTab } from './ui-store'
 export {
+  useByokStore,
+  currentByok,
+  type ByokConnection,
+} from './byok-store'
+export {
   useDraftsStore,
   type DraftsOutcome,
   type LastGeneration,

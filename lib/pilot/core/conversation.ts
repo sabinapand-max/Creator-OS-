@@ -20,7 +20,8 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { Db } from '../db/client.ts'
 import * as repo from '../db/repo.ts'
-import { callModel, parseTurnResponse, readModelConfig, type ModelConfig } from '../model/index.ts'
+import { callModel, parseTurnResponse, type ModelConfig } from '../model/index.ts'
+import { resolveModelConfigForUser } from '../web/modelAccess.ts'
 import type {
   CognitiveSnapshot,
   Conversation,
@@ -149,7 +150,9 @@ export async function submitTurn(db: Db, input: SubmitTurnInput): Promise<Submit
   const { conversation, project } = resolved
   const userId = input.userId
   const channel = input.channel
-  const config = input.modelConfig ?? readModelConfig()
+  // Paywall-aware: BYOK always works; the hosted default only for entitled users;
+  // otherwise a gated config that fails honestly without dialling the paid endpoint.
+  const config = await resolveModelConfigForUser(db, userId, input.modelConfig)
   const runKey = buildRunKey(userId, text, input.idempotencyKey, conversation.id)
 
   // A previously succeeded run is replayed, never re-executed.

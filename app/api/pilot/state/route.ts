@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/pilot/db/client.ts'
 import * as repo from '@/lib/pilot/db/repo.ts'
 import { describeReadiness, readModelConfig } from '@/lib/pilot/model/index.ts'
+import { resolveModelConfigForUser } from '@/lib/pilot/web/modelAccess.ts'
 import { optionalUser } from '@/lib/pilot/web/session.ts'
 import { checkInAndPersist, describeMap } from '@/lib/pilot/cognitive/index.ts'
 import { ENERGY_LEVELS, SENSORY_LEVELS } from '@/lib/pilot/cognitive/stateMachine.ts'
@@ -21,12 +22,19 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: Request) {
   const db = getDb()
   const { userId } = await optionalUser(db)
-  const config = readModelConfig()
-  const readiness = describeReadiness(config)
 
+  // Anonymous: report nothing about the model. The app is public now, and the
+  // provider, model id and endpoint of the hosted default are details of the
+  // operator's paid infrastructure. Every screen that reads `model` sits behind
+  // a session, so an unauthenticated caller simply gets no model report.
   if (!userId) {
-    return NextResponse.json({ signedIn: false, model: publicModelStatus(readiness) })
+    return NextResponse.json({ signedIn: false })
   }
+
+  // Signed-in: reflect exactly what a turn from this user would use, so a free user
+  // sees the “bring your own key” call to action rather than an admin setup message.
+  const effective = await resolveModelConfigForUser(db, userId, undefined)
+  const readiness = describeReadiness(effective)
 
   const url = new URL(request.url)
   const conversationId = url.searchParams.get('conversationId')
@@ -68,7 +76,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     signedIn: true,
     user: user ? { id: user.id, email: user.email, displayName: user.displayName } : null,
-    model: publicModelStatus(readiness),
+    model: publicModelStatus(readiness, effective),
     projects,
     conversations,
     activeConversationId,
@@ -133,8 +141,10 @@ export async function POST(request: Request) {
 }
 
 /** Never leaks the key: only whether one is present and what is configured. */
-function publicModelStatus(readiness: ReturnType<typeof describeReadiness>) {
-  const config = readModelConfig()
+function publicModelStatus(
+  readiness: ReturnType<typeof describeReadiness>,
+  config: ReturnType<typeof readModelConfig>
+) {
   if (readiness.ready) {
     return {
       configured: true,
@@ -145,6 +155,11 @@ function publicModelStatus(readiness: ReturnType<typeof describeReadiness>) {
       // Reported accurately: a loopback endpoint is ready without a key, so
       // claiming one is present would be a lie the UI would repeat.
       apiKeyPresent: Boolean(config.apiKey),
+      // 'paid' | 'trial' | null — how this account is allowed to reach the hosted
+      // model, plus the turns left when it is a trial. The Settings screen renders
+      // this as a balance so the person can see what they have before spending it.
+      entitlement: config.entitlement ?? null,
+      trialTurnsRemaining: config.trialTurnsRemaining ?? null,
     }
   }
   return {
@@ -152,5 +167,7 @@ function publicModelStatus(readiness: ReturnType<typeof describeReadiness>) {
     code: readiness.code,
     message: readiness.message,
     apiKeyPresent: Boolean(config.apiKey),
+    entitlement: config.entitlement ?? null,
+    trialTurnsRemaining: config.trialTurnsRemaining ?? null,
   }
 }

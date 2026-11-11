@@ -7,8 +7,10 @@
  * the browser keeps locally is the draft the user is still typing, which stays
  * in the existing brain-dump store.
  *
- * Nothing here ever holds a model API key. Model readiness is reported as a
- * label plus a boolean, never a value.
+ * Model readiness reported by the server is a label plus a boolean, never a
+ * value. A user's bring-your-own-key lives in a separate, memory-only store
+ * (byok-store); it is read imperatively into a single request body and is never
+ * persisted here or written to localStorage.
  */
 import { create } from 'zustand'
 import type {
@@ -27,6 +29,7 @@ import type {
 } from '@/lib/pilot/types.ts'
 import { useBrainDumpStore } from './brain-dump-store'
 import { useDraftsStore } from './drafts-store'
+import { currentByok, useByokStore } from './byok-store'
 
 export type PilotUser = { id: string; email: string; displayName: string | null }
 
@@ -38,12 +41,18 @@ export type ModelStatus =
       baseUrl: string
       local: boolean
       apiKeyPresent: boolean
+      /** How this account may use the hosted model: 'paid', 'trial', or null (BYOK only). */
+      entitlement?: 'paid' | 'trial' | null
+      /** Hosted turns left on a redeemed trial code. Null when there is no trial. */
+      trialTurnsRemaining?: number | null
     }
   | {
       configured: false
       code: string
       message: string
       apiKeyPresent: boolean
+      entitlement?: 'paid' | 'trial' | null
+      trialTurnsRemaining?: number | null
     }
 
 export type ModelRunSummary = {
@@ -128,6 +137,8 @@ interface PilotStore {
     password: string,
     displayName?: string
   ) => Promise<{ ok: boolean; error?: string }>
+  /** Paste a trial code the owner handed out; grants hosted turns on success. */
+  redeemTrialCode: (code: string) => Promise<{ ok: boolean; error?: string; turns?: number }>
   signOut: () => Promise<void>
   submitTurn: (input: {
     text: string
@@ -255,6 +266,16 @@ export const usePilotStore = create<PilotStore>()((set, get) => ({
     return { ok: true }
   },
 
+  redeemTrialCode: async (code) => {
+    const { status, data } = await postJson('/api/pilot/trial/redeem', { code })
+    if (!data?.ok) {
+      return { ok: false, error: data?.error ?? `Could not redeem that code (HTTP ${status}).` }
+    }
+    // Reload so the trial balance in `model` reflects the grant immediately.
+    await get().refresh()
+    return { ok: true, turns: Number(data.turns ?? 0) }
+  },
+
   signOut: async () => {
     await postJson('/api/pilot/auth', { action: 'signout' }).catch(() => null)
     // The local draft keeps its owner id, so signing back in as the same account
@@ -262,13 +283,16 @@ export const usePilotStore = create<PilotStore>()((set, get) => ({
     // Generated drafts are dropped instead: they are another account's records
     // and the server will hand back the right ones on the next sign-in.
     useDraftsStore.getState().reset()
+    // A bring-your-own-key is another account's secret; drop it with the session.
+    useByokStore.getState().clear()
     set({ ...EMPTY, status: 'anonymous', hydrated: true, loadError: null })
   },
 
   submitTurn: async (input) => {
     set({ submitting: true })
     try {
-      const { status, data } = await postJson('/api/pilot/turn', input)
+      // A memory-only BYOK connection, if set, rides along for this one request.
+      const { status, data } = await postJson('/api/pilot/turn', { ...input, byok: currentByok() })
 
       if (!data || typeof data !== 'object') {
         return { ok: false, kind: 'rejected', error: `Unexpected response (HTTP ${status}).`, status }
