@@ -33,18 +33,35 @@ const navItems: { id: ActiveTab; label: string; icon: React.ElementType }[] = [
 ]
 
 export function Sidebar() {
-  const { activeTab, setActiveTab, sidebarCollapsed, toggleSidebar } = useUIStore()
+  const { activeTab, setActiveTab, sidebarCollapsed, toggleSidebar, mobileNavOpen, setMobileNavOpen } = useUIStore()
   const user = usePilotStore((s) => s.user)
   const signOut = usePilotStore((s) => s.signOut)
   const pathname = usePathname()
 
+  // Below md the sidebar is never inline: 256px of a 390px screen would leave
+  // the content pane unusable. It becomes a slide-over drawer, closed by any
+  // navigation, by the backdrop, or by signing out.
+  const closeMobile = () => setMobileNavOpen(false)
+
   return (
-    <aside
-      className={cn(
-        'relative flex h-full flex-col border-r border-border bg-sidebar transition-all duration-300',
-        sidebarCollapsed ? 'w-16' : 'w-64'
+    <>
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={closeMobile}
+          aria-hidden
+        />
       )}
-    >
+      <aside
+        className={cn(
+          'relative h-full flex-col border-r border-border bg-sidebar transition-all duration-300',
+          'fixed inset-y-0 left-0 z-50 w-64 md:static',
+          mobileNavOpen ? 'flex' : 'hidden',
+          'md:flex',
+          !mobileNavOpen && sidebarCollapsed && 'md:w-16',
+          mobileNavOpen ? 'w-64' : undefined
+        )}
+      >
       {/* Logo */}
       <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-4">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
@@ -67,7 +84,12 @@ export function Sidebar() {
           return (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => {
+                setActiveTab(item.id)
+                closeMobile()
+              }}
+              title={item.label}
+              aria-label={item.label}
               className={cn(
                 'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
                 isActive
@@ -86,6 +108,9 @@ export function Sidebar() {
       <div className="px-3 pb-1">
         <Link
           href="/telegram"
+          onClick={closeMobile}
+          title="Telegram"
+          aria-label="Telegram"
           className={cn(
             'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
             pathname === '/telegram'
@@ -119,7 +144,10 @@ export function Sidebar() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => void signOut()}
+            onClick={() => {
+              void signOut()
+              closeMobile()
+            }}
             className="mt-1 w-full justify-center text-muted-foreground hover:text-foreground"
           >
             <LogOut className="h-4 w-4" />
@@ -146,6 +174,7 @@ export function Sidebar() {
           )}
         </Button>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }

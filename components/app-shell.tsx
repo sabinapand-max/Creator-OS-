@@ -10,7 +10,7 @@
  */
 
 import { useEffect } from 'react'
-import { AlertCircle, Loader2 } from 'lucide-react'
+import { AlertCircle, Loader2, Menu } from 'lucide-react'
 import { usePilotStore, useUIStore } from '@/lib/stores'
 import { Sidebar } from './sidebar'
 import { Dashboard } from './screens/dashboard'
@@ -39,7 +39,7 @@ import { SignInScreen } from './screens/sign-in'
 const LOCAL_ONLY_TABS = new Set(['memory'])
 
 export function AppShell() {
-  const { activeTab, focusMode } = useUIStore()
+  const { activeTab, focusMode, setMobileNavOpen } = useUIStore()
   const status = usePilotStore((s) => s.status)
   const hydrated = usePilotStore((s) => s.hydrated)
   const loadError = usePilotStore((s) => s.loadError)
@@ -89,7 +89,20 @@ export function AppShell() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
-      {!focusMode && <Sidebar />}
+      {!focusMode && (
+        <>
+          <Sidebar />
+          {/* Mobile-only drawer trigger; the sidebar itself is a slide-over
+              below md (see sidebar.tsx) and inline from md up. */}
+          <button
+            onClick={() => setMobileNavOpen(true)}
+            aria-label="Open navigation"
+            className="fixed bottom-4 left-4 z-30 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg md:hidden"
+          >
+            <Menu className="h-6 w-6" />
+          </button>
+        </>
+      )}
       <main className="flex-1 overflow-auto">
         {loadError && (
           <div className="flex items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs text-destructive">

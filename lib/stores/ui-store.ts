@@ -14,6 +14,8 @@ interface ProviderSettings {
 interface UIStore {
   activeTab: ActiveTab
   marketplaceTab: MarketplaceTab
+  /** Mobile drawer state: the sidebar is a slide-over below md, never inline. */
+  mobileNavOpen: boolean
   selectedGenerationId: string | null
   sidebarCollapsed: boolean
   focusMode: boolean
@@ -24,6 +26,7 @@ interface UIStore {
   }
   providerSettings: ProviderSettings
   setActiveTab: (tab: ActiveTab) => void
+  setMobileNavOpen: (open: boolean) => void
   setMarketplaceTab: (tab: MarketplaceTab) => void
   setSelectedGenerationId: (id: string | null) => void
   toggleSidebar: () => void
@@ -44,6 +47,7 @@ export const useUIStore = create<UIStore>()(
       // A browser that already persisted 'etsy' keeps it and sees the honest
       // out-of-scope panel, with one click through to the working tabs.
       marketplaceTab: 'gumroad',
+      mobileNavOpen: false,
       selectedGenerationId: null,
       sidebarCollapsed: false,
       focusMode: false,
@@ -59,6 +63,7 @@ export const useUIStore = create<UIStore>()(
         preferredProvider: 'groq',
       },
       setActiveTab: (tab) => set({ activeTab: tab }),
+      setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
       setMarketplaceTab: (tab) => set({ marketplaceTab: tab }),
       setSelectedGenerationId: (id) => set({ selectedGenerationId: id }),
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),

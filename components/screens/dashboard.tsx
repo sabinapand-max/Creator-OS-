@@ -64,7 +64,7 @@ export function Dashboard() {
       <div className="mx-auto max-w-6xl space-y-8">
         <header className="space-y-2">
           <h1 className="text-3xl font-bold tracking-tight text-foreground">
-            {started ? 'Welcome back' : 'Welcome to your private pilot'}
+            {started ? 'Welcome back' : 'Welcome to Creator OS'}
           </h1>
           <p className="text-muted-foreground">
             {started
