@@ -17,6 +17,8 @@ import { cookies } from 'next/headers'
 import { getDb } from '@/lib/pilot/db/client.ts'
 import * as repo from '@/lib/pilot/db/repo.ts'
 import { registerAccount, signIn, SESSION_TTL_MS } from '@/lib/pilot/auth/index.ts'
+import { completePasswordReset, issuePasswordReset } from '@/lib/pilot/auth/reset.ts'
+import { sendAgentMail } from '@/lib/pilot/mail.ts'
 import { clearedSessionCookie, sessionCookie } from '@/lib/pilot/web/session.ts'
 
 export const runtime = 'nodejs'
@@ -32,6 +34,11 @@ const ERROR_TEXT: Record<string, string> = {
 
 const WAITLIST_HINT =
   'Indigos is invite-only right now. Join the waitlist at creatoros.indigos.uk and we\u2019ll email you a link the moment a spot opens.'
+
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+function EMAIL_RE_LIKE(email: string): boolean {
+  return EMAIL_SHAPE.test(email)
+}
 
 /**
  * True when this email may create an account. Only enforced while
@@ -68,6 +75,53 @@ export async function POST(request: Request) {
     if (sessionId) await repo.revokeSession(db, sessionId)
     store.set(clearedSessionCookie())
     return NextResponse.json({ ok: true })
+  }
+
+  if (action === 'forgot') {
+    // Enumeration-safe: the response is identical whether or not the address
+    // has an account. The email send is best-effort and never surfaced.
+    const email = String(body?.email || '').trim().toLowerCase()
+    const user = EMAIL_RE_LIKE(email) ? await repo.getUserByEmail(db, email) : null
+    if (user) {
+      const issued = await issuePasswordReset(db, user.id)
+      if (issued.ok) {
+        const sent = await sendAgentMail({
+          to: email,
+          subject: 'Your Indigos recovery code',
+          text:
+            `You asked to reset your Indigos Creator OS password.\n\n` +
+            `Your recovery code: ${issued.code}\n` +
+            `It works for 24 hours and can be used once.\n\n` +
+            `Enter it on the sign-in page under "Forgot password?".\n` +
+            `If you did not request this, nothing happens — just ignore this email.\n\n` +
+            `— Indigos`,
+        })
+        if (!sent) console.warn('[auth] recovery email not delivered (mail provider rejected or unconfigured)')
+      }
+    }
+    return NextResponse.json({
+      ok: true,
+      message: 'If that email has an account, a recovery code is on its way. Check the inbox within a day.',
+    })
+  }
+
+  if (action === 'reset') {
+    const email = String(body?.email || '')
+    const code = String(body?.code || '')
+    const password = String(body?.password || '')
+    const done = await completePasswordReset(db, { email, code, password })
+    if (!done.ok) {
+      const text =
+        done.error === 'weak_password'
+          ? 'Use at least 10 characters for your password.'
+          : done.error === 'expired'
+            ? 'That code has expired. Request a new one.'
+            : done.error === 'too_many_attempts'
+              ? 'Too many tries with that code. Request a new one.'
+              : 'That code does not work. Request a new one.'
+      return NextResponse.json({ ok: false, error: text }, { status: 400 })
+    }
+    return NextResponse.json({ ok: true, message: 'Password changed. Sign in with your new password.' })
   }
 
   if (action !== 'signin' && action !== 'register') {

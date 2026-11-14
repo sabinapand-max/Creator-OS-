@@ -332,4 +332,17 @@ CREATE TABLE IF NOT EXISTS auth_attempts (
 
 CREATE INDEX IF NOT EXISTS idx_auth_attempts_email
   ON auth_attempts(email_hash, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS password_reset_codes (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash    TEXT NOT NULL UNIQUE,
+  created_at   TEXT NOT NULL,
+  expires_at   TEXT NOT NULL,
+  consumed_at  TEXT,
+  attempts     INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_reset_codes_user
+  ON password_reset_codes(user_id, created_at DESC);
 `
