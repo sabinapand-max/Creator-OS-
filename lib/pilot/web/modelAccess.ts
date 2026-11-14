@@ -23,15 +23,16 @@ import { describeTrial } from '../auth/trial.ts'
 
 /** Surfaced verbatim in the UI when a free user tries to use the hosted default. */
 export const BYOK_GATE_MESSAGE =
-  'The hosted model runs on the free trial and £3 credit packs — buy one or redeem a code in Settings, ' +
-  'or bring your own key there — “Bring your own key” — to generate instantly and free: ' +
-  'your key, your provider, your usage, nothing to pay here.'
+  'The hosted model runs on free trials and £3 credit packs. Buy a credit pack in Settings ' +
+  '(30 generations, the activation code arrives by email), ask contact@indigos.uk for a trial extension, ' +
+  'or add your own key in Settings — “Bring your own key” — and generate as much as you like, free, on your own account.'
 
 /** Same, for an account whose trial ran out of turns or whose window lapsed. */
 export const TRIAL_EXHAUSTED_GATE_MESSAGE =
-  'Your free trial on the hosted model has ended — its turns are used up or its window closed. ' +
-  'Buy a 30-generation credit pack (£3, one-time checkout) and redeem the activation code it emails you in Settings, ' +
-  'or add your own key in Settings — “Bring your own key” — to keep generating on your own account.'
+  'Your free trial is used up — every account starts with 20 hosted generations, no card asked. ' +
+  'To carry on: buy a credit pack in Settings (30 generations for £3, activation code by email), ' +
+  'or ask contact@indigos.uk for a trial extension code if you want more time before paying, ' +
+  'or add your own key in Settings — “Bring your own key” — to keep going free on your own account.'
 
 export async function resolveModelConfigForUser(
   db: Db,

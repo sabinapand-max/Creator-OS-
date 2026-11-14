@@ -401,9 +401,31 @@ export function ModelStatusCard({ compact = false }: { compact?: boolean }) {
             {model.modelId} @ {model.baseUrl}
           </p>
           <p className="text-xs text-muted-foreground">
+            Runs on our own AI model — a Gemma fine-tuned by us on a neurodivergent creator dataset.
+          </p>
+          <p className="text-xs text-muted-foreground">
             {model.local
               ? 'Local endpoint. No API key needed and nothing leaves this machine.'
               : `Hosted by Indigos (${model.provider}) — no key needed from you, and you can bring your own key in Settings any time to run on your own account.`}
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (model.code === 'byok_required') {
+    // Not a broken setup — a finished trial. Say so plainly and list the exits.
+    return (
+      <Card className={compact ? 'bg-card border-border' : 'bg-card border-chart-3/30'}>
+        <CardContent className="space-y-1 py-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-chart-3">
+            <CheckCircle2 className="h-4 w-4" />
+            Free trial used up — your data is untouched
+          </div>
+          <p className="text-xs text-muted-foreground">{model.message}</p>
+          <p className="text-xs text-muted-foreground">
+            Everything you have written is saved as always, and no invented text will ever be
+            shown in place of a real answer.
           </p>
         </CardContent>
       </Card>

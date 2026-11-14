@@ -18,12 +18,19 @@
  */
 
 import { useEffect, useState } from 'react'
-import { AlertCircle, CheckCircle2, KeyRound, Loader2, Plug, Server, Ticket, Trash2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, CreditCard, KeyRound, Loader2, Plug, Server, Ticket, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useBufferStore, useByokStore, usePilotStore, useUIStore } from '@/lib/stores'
+
+/**
+ * Stripe payment link for the 30-generation credit pack. One constant to
+ * repoint if the link is recreated — it must be a LIVE-mode link whose
+ * product is the £3 one-time pack, nothing else.
+ */
+const CREDIT_PACK_URL = 'https://buy.stripe.com/eVqcMYbxweOKeIS3nE7N602'
 
 export function SettingsScreen() {
   const model = usePilotStore((s) => s.model)
@@ -246,10 +253,10 @@ function TrialCard() {
           Free trial
         </CardTitle>
         <CardDescription>
-          Your account started with a free hosted-model trial: 20 generations inside a 14-day
-          window. When it ends, redeem a code here — credit packs (30 generations, £3, secure
-          one-time checkout) arrive by email as activation codes — or bring your own key;
-          the same account and the same history keep working.
+          Every account starts free: 20 hosted generations over 14 days, no card. When they run
+          out, buy a credit pack (£3 for 30 generations, code arrives by email), ask
+          contact@indigos.uk for a trial-extension code, or bring your own key — the same
+          account and the same history keep working either way.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -282,6 +289,24 @@ function TrialCard() {
             Redeem
           </Button>
         </form>
+
+        <a
+          href={CREDIT_PACK_URL}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/20"
+        >
+          <CreditCard className="h-4 w-4" />
+          Buy a credit pack — 30 generations, £3
+        </a>
+        <p className="text-xs text-muted-foreground">
+          Secure one-time Stripe checkout, no subscription. The activation code arrives by email;
+          paste it above. Prefer more trial time first? Just ask at{' '}
+          <a href="mailto:contact@indigos.uk" className="underline hover:text-foreground">
+            contact@indigos.uk
+          </a>
+          .
+        </p>
 
         {note && (
           <p className={'text-sm ' + (note.ok ? 'text-chart-3' : 'text-destructive')}>{note.text}</p>

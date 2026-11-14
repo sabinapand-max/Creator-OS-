@@ -93,6 +93,8 @@ export async function POST(request: Request) {
             `Your recovery code: ${issued.code}\n` +
             `It works for 24 hours and can be used once.\n\n` +
             `Enter it on the sign-in page under "Forgot password?".\n` +
+            `(If it did not arrive within a few minutes, check the spam folder — and adding\n` +
+            `trisindigo@agentmail.to to your contacts helps the next one land in the inbox.)\n` +
             `If you did not request this, nothing happens — just ignore this email.\n\n` +
             `— Indigos`,
         })
