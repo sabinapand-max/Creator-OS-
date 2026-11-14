@@ -241,8 +241,8 @@ function TrialCard() {
         </CardTitle>
         <CardDescription>
           Your account started with a free hosted-model trial: 20 generations inside a 14-day
-          window. When it ends, redeem a code here — credit packs (30 generations, $3) are sold
-          in our Ko-fi shop and arrive by email as activation codes — or bring your own key;
+          window. When it ends, redeem a code here — credit packs (30 generations, $3, secure
+          one-time checkout) arrive by email as activation codes — or bring your own key;
           the same account and the same history keep working.
         </CardDescription>
       </CardHeader>
