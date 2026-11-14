@@ -151,6 +151,13 @@ export function SignInScreen() {
                 </p>
               )}
             </form>
+
+            <p className="pt-1 text-center text-xs text-muted-foreground">
+              Trouble signing in?{' '}
+              <a href="mailto:contact@indigos.uk" className="underline hover:text-foreground">
+                contact@indigos.uk
+              </a>
+            </p>
           </CardContent>
         </Card>
 

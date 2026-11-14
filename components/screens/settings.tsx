@@ -153,6 +153,12 @@ AI_API_KEY=<only for remote providers>`}
         <CardContent className="text-sm">
           <p className="text-foreground">{user?.displayName || '—'}</p>
           <p className="font-mono text-xs text-muted-foreground">{user?.email}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Questions, feedback or locked out?{' '}
+            <a href="mailto:contact@indigos.uk" className="underline hover:text-foreground">
+              contact@indigos.uk
+            </a>
+          </p>
         </CardContent>
       </Card>
 
@@ -241,7 +247,7 @@ function TrialCard() {
         </CardTitle>
         <CardDescription>
           Your account started with a free hosted-model trial: 20 generations inside a 14-day
-          window. When it ends, redeem a code here — credit packs (30 generations, $3, secure
+          window. When it ends, redeem a code here — credit packs (30 generations, £3, secure
           one-time checkout) arrive by email as activation codes — or bring your own key;
           the same account and the same history keep working.
         </CardDescription>

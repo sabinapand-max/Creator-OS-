@@ -23,14 +23,15 @@ import { describeTrial } from '../auth/trial.ts'
 
 /** Surfaced verbatim in the UI when a free user tries to use the hosted default. */
 export const BYOK_GATE_MESSAGE =
-  'The hosted model is part of a paid plan. Bring your own key in Settings — “Bring your own key” — ' +
-  'to generate instantly and free: your key, your provider, your usage, nothing to pay here.'
+  'The hosted model runs on the free trial and £3 credit packs — buy one or redeem a code in Settings, ' +
+  'or bring your own key there — “Bring your own key” — to generate instantly and free: ' +
+  'your key, your provider, your usage, nothing to pay here.'
 
 /** Same, for an account whose trial ran out of turns or whose window lapsed. */
 export const TRIAL_EXHAUSTED_GATE_MESSAGE =
   'Your free trial on the hosted model has ended — its turns are used up or its window closed. ' +
-  'Add your own key in Settings — “Bring your own key” — to keep generating on your own account, ' +
-  'or ask for an extended-trial code and redeem it right there in Settings.'
+  'Buy a 30-generation credit pack (£3, one-time checkout) and redeem the activation code it emails you in Settings, ' +
+  'or add your own key in Settings — “Bring your own key” — to keep generating on your own account.'
 
 export async function resolveModelConfigForUser(
   db: Db,
