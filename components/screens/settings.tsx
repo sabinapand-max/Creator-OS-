@@ -17,7 +17,7 @@
  * reachable from this UI.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertCircle, CheckCircle2, KeyRound, Loader2, Plug, Server, Ticket, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -31,8 +31,6 @@ export function SettingsScreen() {
   const user = usePilotStore((s) => s.user)
   const { providerSettings, updateProviderSettings } = useUIStore()
   const bufferKey = useBufferStore((s) => s.apiKey)
-
-  const [purged, setPurged] = useState(false)
 
   const storedKeys = [
     providerSettings.groqKey && 'groqKey',
@@ -48,8 +46,16 @@ export function SettingsScreen() {
     // the dialog shows the disabled notice rather than a stale "connected" form.
     useBufferStore.getState().setApiKey('')
     useBufferStore.getState().setConnected(false)
-    setPurged(true)
   }
+
+  // 2026-11-14: the "Keys stored in this browser" card was removed — pilot-era
+  // housekeeping nobody recognised, and it alarmed users who had never seen it.
+  // The purge now runs silently on mount; the values were never used by any
+  // code path anyway.
+  useEffect(() => {
+    if (storedKeys.length > 0) purgeBrowserKeys()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div className="space-y-6 p-6 lg:p-8 animate-in fade-in duration-500">
@@ -135,40 +141,6 @@ AI_API_KEY=<only for remote providers>`}
       <TrialCard />
 
       <ByokCard />
-
-      {/* Browser key purge */}
-      <Card className={storedKeys.length ? 'bg-card border-destructive/40' : 'bg-card border-border'}>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <KeyRound className="h-5 w-5 text-muted-foreground" />
-            Keys stored in this browser
-          </CardTitle>
-          <CardDescription>
-            Older builds of this app saved provider keys — and a Buffer publishing key — to
-            localStorage. No code path uses them any more, and the values should not stay on the
-            machine.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {storedKeys.length > 0 ? (
-            <>
-              <p className="text-sm text-destructive">
-                Found {storedKeys.length} leftover value(s):{' '}
-                <span className="font-mono">{storedKeys.join(', ')}</span>
-              </p>
-              <Button variant="outline" onClick={purgeBrowserKeys} className="gap-2 border-destructive/40 text-destructive">
-                <Trash2 className="h-4 w-4" />
-                Delete them from this browser
-              </Button>
-            </>
-          ) : (
-            <p className="flex items-center gap-2 text-sm text-chart-3">
-              <CheckCircle2 className="h-4 w-4" />
-              {purged ? 'Cleared. No provider or publishing keys remain in this browser.' : 'None. This browser holds no provider or publishing keys.'}
-            </p>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Account */}
       <Card className="bg-card border-border">
@@ -269,7 +241,8 @@ function TrialCard() {
         </CardTitle>
         <CardDescription>
           Your account started with a free hosted-model trial: 20 generations inside a 14-day
-          window. When it ends, redeem an extended-trial code here, or bring your own key —
+          window. When it ends, redeem a code here — credit packs (30 generations, $3) are sold
+          in our Ko-fi shop and arrive by email as activation codes — or bring your own key;
           the same account and the same history keep working.
         </CardDescription>
       </CardHeader>
