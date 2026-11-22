@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Indigos — Creative OS',
-  description: 'The creative operating system for neurodivergent minds. From a messy brain dump to one doable next step, sized to how you are actually running. Meaning before productivity.',
+  title: 'Indigos — Creator OS',
+  description: 'Capacity-aware workspace for neurodivergent solo creators. Brain dump, surface one action, re-enter.',
   generator: 'v0.app',
   icons: {
     icon: [
